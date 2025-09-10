@@ -40,6 +40,9 @@ class CameraModule(QtCore.QObject):
         self._vlc = vlc_instance
         self._log_func = log_func
         self._root = self._build_ui()
+        self.hevc_guard_ms = 4000
+        self._hevc_guard_tried = False
+        self._last_codec = ""
 
     # ---- public API for the shell ----
     def widget(self) -> QtWidgets.QWidget:
@@ -374,6 +377,7 @@ class CameraModule(QtCore.QObject):
         if mode.startswith("RTSP"):
             url = self._compose_rtsp_url()
             codec = self._probe_codec(url, user, pwd)
+            self._last_codec = codec
             if codec in ("hevc", "h265"):
                 alt_path = self._guess_h264_alt_rtsp(self.rtsp_path.text().strip())
                 if alt_path:
@@ -381,6 +385,7 @@ class CameraModule(QtCore.QObject):
                     if self._probe_codec(alt_url, user, pwd) == "h264":
                         self.rtsp_path.setText(alt_path)
                         url = alt_url
+            self._hevc_guard_tried = False
             self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
             # פרסום הגדרות PTZ
             self._publish_ptz_cfg()
@@ -393,10 +398,12 @@ class CameraModule(QtCore.QObject):
             return
         url = res
         codec = self._probe_codec(url, user, pwd)
+        self._last_codec = codec
         if codec in ("hevc", "h265"):
             alt = self._guess_h264_alt_onvif(h, int(self.onvif_port.value()), user, pwd)
             if alt and self._probe_codec(alt, user, pwd) == "h264":
                 url = alt
+        self._hevc_guard_tried = False
         self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
         # פרסום הגדרות PTZ
         self._publish_ptz_cfg()
@@ -476,6 +483,9 @@ class CameraModule(QtCore.QObject):
         if self.chk_record_auto.isChecked():
             QtCore.QTimer.singleShot(300, self._start_manual_record)
 
+        if self.hevc_guard_ms and not self._hevc_guard_tried:
+            QtCore.QTimer.singleShot(self.hevc_guard_ms, self._hevc_guard_check)
+
     def _stop_player(self):
         try:
             self.video.player().stop()
@@ -549,6 +559,52 @@ class CameraModule(QtCore.QObject):
             except Exception:
                 pass
         self.metrics.setText(f"State: {st} | {w}x{h} | FPS:{fps:.1f} | in:{in_kbps} kbps | demux:{demux_kbps} kbps")
+
+    # ===== HEVC guard =====
+    def _hevc_guard_check(self):
+        if self._hevc_guard_tried or self.mode.currentIndex() == 0:
+            return
+        p = self.video.player()
+        if p is None:
+            return
+        try:
+            w, h = p.video_get_size(0)
+        except Exception:
+            w = h = 0
+        fps = p.get_fps() or 0.0
+        if (w <= 0 or h <= 0 or fps < 0.1) and self._last_codec in ("hevc", "h265"):
+            self._log("HEVC Guard: no video detected, trying H.264 fallback")
+            self._fallback_to_h264()
+
+    def _fallback_to_h264(self):
+        if self._hevc_guard_tried:
+            return
+        self._hevc_guard_tried = True
+        mode = self.real_mode.currentText()
+        host_in = self.host.text().strip()
+        h, _, _ = sanitize_host(host_in)
+        user = self.user.text().strip(); pwd = self.pwd.text().strip()
+        if mode.startswith("RTSP"):
+            alt_path = self._guess_h264_alt_rtsp(self.rtsp_path.text().strip())
+            if alt_path:
+                alt_url = f"rtsp://{h}:{self.rtsp_port.value()}{alt_path}"
+                codec = self._probe_codec(alt_url, user, pwd)
+                if codec == "h264":
+                    self.rtsp_path.setText(alt_path)
+                    self._last_codec = codec
+                    self._start_player(alt_url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
+                    self._log("HEVC Guard: fallback to H.264 -> " + alt_url)
+                    return
+        else:
+            alt = self._guess_h264_alt_onvif(h, int(self.onvif_port.value()), user, pwd)
+            if alt:
+                codec = self._probe_codec(alt, user, pwd)
+                if codec == "h264":
+                    self._last_codec = codec
+                    self._start_player(alt, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
+                    self._log("HEVC Guard: fallback to H.264 -> " + alt)
+                    return
+        self._log("HEVC Guard: H.264 fallback failed")
 
     def _export_logs(self):
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -8,6 +8,10 @@
     "rtsp_port": 554,
     "rtsp_path": "/cam/realmonitor?channel=1&subtype=1",
     "onvif_port": 8080,
-    "force_tcp": true
+    "force_tcp": true,
+    "ptz_cgi_port": 80,
+    "ptz_cgi_channel": 1,
+    "ptz_cgi_poll_hz": 5.0,
+    "ptz_cgi_https": false
   }
 ]

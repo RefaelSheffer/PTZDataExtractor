@@ -27,6 +27,23 @@ import shared_state  # <<< לשיתוף הגדרות ה-PTZ עם מודולים 
 
 APP_DIR = Path(__file__).resolve().parent
 PROFILES_PATH = APP_DIR / "profiles.json"  # module-specific profiles
+APP_CFG = APP_DIR / "app_config.json"
+
+
+def load_cfg() -> dict:
+    if APP_CFG.exists():
+        try:
+            return json.loads(APP_CFG.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def save_cfg(cfg: dict) -> None:
+    try:
+        APP_CFG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 class CameraModule(QtCore.QObject):
@@ -43,8 +60,11 @@ class CameraModule(QtCore.QObject):
         super().__init__()
         self._vlc = vlc_instance
         self._log_func = log_func
+        self._cfg = load_cfg()
+        self.hevc_guard_ms = int(self._cfg.get("hevc_guard_ms", 4000))
+        self.prefer_h264 = bool(self._cfg.get("prefer_h264", False))
+        self.suppress_stderr = bool(self._cfg.get("suppress_stderr", False))
         self._root = self._build_ui()
-        self.hevc_guard_ms = 4000
         self._hevc_guard_tried = False
         self._last_codec = ""
         self._ptz_meta: Optional[PtzMetaThread] = None
@@ -79,9 +99,15 @@ class CameraModule(QtCore.QObject):
 
         # ---------- Mock page ----------
         mock = QtWidgets.QWidget(); ml = QtWidgets.QGridLayout(mock)
-        self.mediamtx_path = QtWidgets.QLineEdit(str(Path.cwd() / "mediamtx.exe"))
-        self.ffmpeg_path   = QtWidgets.QLineEdit(which("ffmpeg")  or r"C:\ffmpeg\bin\ffmpeg.exe")
-        self.ffprobe_path  = QtWidgets.QLineEdit(which("ffprobe") or r"C:\ffmpeg\bin\ffprobe.exe")
+        self.mediamtx_path = QtWidgets.QLineEdit(
+            self._cfg.get("mediamtx_path", str(Path.cwd() / "mediamtx.exe"))
+        )
+        self.ffmpeg_path = QtWidgets.QLineEdit(
+            self._cfg.get("ffmpeg_path", which("ffmpeg") or r"C:\\ffmpeg\\bin\\ffmpeg.exe")
+        )
+        self.ffprobe_path = QtWidgets.QLineEdit(
+            self._cfg.get("ffprobe_path", which("ffprobe") or r"C:\\ffmpeg\\bin\\ffprobe.exe")
+        )
         self.mock_file  = QtWidgets.QLineEdit()
         btn_browse = QtWidgets.QPushButton("Browse MP4…"); btn_browse.clicked.connect(self._choose_mp4)
         self.mock_port  = QtWidgets.QSpinBox(); self.mock_port.setRange(1024,65535); self.mock_port.setValue(8554)
@@ -144,17 +170,41 @@ class CameraModule(QtCore.QObject):
         rec_layout = QtWidgets.QGridLayout(self.rec_group)
         self.chk_record_auto = QtWidgets.QCheckBox("Auto-start record on connect")
         self.rec_format = QtWidgets.QComboBox(); self.rec_format.addItems(["mp4","mkv","ts"])
-        self.rec_path   = QtWidgets.QLineEdit(str(Path.cwd() / "recordings"))  # תיקייה או קובץ
+        self.rec_path = QtWidgets.QLineEdit(str(Path.cwd() / "recordings"))  # תיקייה או קובץ
         self.btn_rec_start = QtWidgets.QPushButton("Start Record")
-        self.btn_rec_stop  = QtWidgets.QPushButton("Stop Record"); self.btn_rec_stop.setEnabled(False)
+        self.btn_rec_stop = QtWidgets.QPushButton("Stop Record"); self.btn_rec_stop.setEnabled(False)
         self.btn_rec_folder = QtWidgets.QPushButton("Open recordings folder")
         self.rec_indicator = QtWidgets.QLabel("REC: OFF"); self.rec_indicator.setStyleSheet("color:#aaa; font-weight:bold;")
-        r=0
-        rec_layout.addWidget(self.chk_record_auto, r,0,1,2); r+=1
-        rec_layout.addWidget(QtWidgets.QLabel("Format:"), r,0); rec_layout.addWidget(self.rec_format, r,1); r+=1
-        rec_layout.addWidget(QtWidgets.QLabel("Output (folder or file):"), r,0); rec_layout.addWidget(self.rec_path, r,1,1,2); r+=1
-        rec_layout.addWidget(self.btn_rec_start, r,0); rec_layout.addWidget(self.btn_rec_stop, r,1); rec_layout.addWidget(self.btn_rec_folder, r,2); r+=1
-        rec_layout.addWidget(self.rec_indicator, r,0); r+=1
+        r = 0
+        rec_layout.addWidget(self.chk_record_auto, r, 0, 1, 2); r += 1
+        rec_layout.addWidget(QtWidgets.QLabel("Format:"), r, 0); rec_layout.addWidget(self.rec_format, r, 1); r += 1
+        rec_layout.addWidget(QtWidgets.QLabel("Output (folder or file):"), r, 0); rec_layout.addWidget(self.rec_path, r, 1, 1, 2); r += 1
+        rec_layout.addWidget(self.btn_rec_start, r, 0); rec_layout.addWidget(self.btn_rec_stop, r, 1); rec_layout.addWidget(self.btn_rec_folder, r, 2); r += 1
+        rec_layout.addWidget(self.rec_indicator, r, 0); r += 1
+
+        # PTZ CGI group
+        self.ptz_group = QtWidgets.QGroupBox("PTZ CGI")
+        ptz_layout = QtWidgets.QGridLayout(self.ptz_group)
+        self.ptz_cgi_port = QtWidgets.QSpinBox(); self.ptz_cgi_port.setRange(1, 65535); self.ptz_cgi_port.setValue(int(self._cfg.get("ptz_cgi_port", 80)))
+        self.ptz_cgi_channel = QtWidgets.QSpinBox(); self.ptz_cgi_channel.setRange(1, 16); self.ptz_cgi_channel.setValue(int(self._cfg.get("ptz_cgi_channel", 1)))
+        self.ptz_cgi_poll = QtWidgets.QDoubleSpinBox(); self.ptz_cgi_poll.setRange(0.1, 30.0); self.ptz_cgi_poll.setSingleStep(0.5); self.ptz_cgi_poll.setValue(float(self._cfg.get("ptz_cgi_poll_hz", 5.0)))
+        self.ptz_cgi_https = QtWidgets.QCheckBox("HTTPS"); self.ptz_cgi_https.setChecked(bool(self._cfg.get("ptz_cgi_https", False)))
+        r = 0
+        ptz_layout.addWidget(QtWidgets.QLabel("Port:"), r, 0); ptz_layout.addWidget(self.ptz_cgi_port, r, 1); r += 1
+        ptz_layout.addWidget(QtWidgets.QLabel("Channel:"), r, 0); ptz_layout.addWidget(self.ptz_cgi_channel, r, 1); r += 1
+        ptz_layout.addWidget(QtWidgets.QLabel("Poll Hz:"), r, 0); ptz_layout.addWidget(self.ptz_cgi_poll, r, 1); r += 1
+        ptz_layout.addWidget(self.ptz_cgi_https, r, 0, 1, 2); r += 1
+
+        # Advanced group
+        self.adv_group = QtWidgets.QGroupBox("Advanced")
+        adv_layout = QtWidgets.QGridLayout(self.adv_group)
+        self.hevc_guard = QtWidgets.QSpinBox(); self.hevc_guard.setRange(0, 10000); self.hevc_guard.setValue(self.hevc_guard_ms)
+        self.prefer_h264_chk = QtWidgets.QCheckBox("Prefer H.264"); self.prefer_h264_chk.setChecked(self.prefer_h264)
+        self.suppress_stderr_chk = QtWidgets.QCheckBox("Suppress stderr"); self.suppress_stderr_chk.setChecked(self.suppress_stderr)
+        r = 0
+        adv_layout.addWidget(QtWidgets.QLabel("HEVC guard (ms):"), r, 0); adv_layout.addWidget(self.hevc_guard, r, 1); r += 1
+        adv_layout.addWidget(self.prefer_h264_chk, r, 0, 1, 2); r += 1
+        adv_layout.addWidget(self.suppress_stderr_chk, r, 0, 1, 2); r += 1
 
         # סידור גריד
         row=0
@@ -178,7 +228,9 @@ class CameraModule(QtCore.QObject):
         rl.addWidget(self.btn_netcheck,row,2)
         rl.addWidget(self.btn_open_ext,row,3); row+=1
 
+        rl.addWidget(self.ptz_group, row,0,1,4); row+=1
         rl.addWidget(self.rec_group, row,0,1,4); row+=1
+        rl.addWidget(self.adv_group, row,0,1,4); row+=1
 
         self.stack.addWidget(real)
 
@@ -198,15 +250,15 @@ class CameraModule(QtCore.QObject):
         self.logs = QtWidgets.QPlainTextEdit(); self.logs.setReadOnly(True); self.logs.setMaximumBlockCount(10000); vbox.addWidget(self.logs)
 
         # ---------- Backends ----------
-        self.mediamtx = MediaMtxServer(self.mediamtx_path.text())
-        self.pusher   = PushStreamer(self.ffmpeg_path.text())
+        self.mediamtx = MediaMtxServer(self.mediamtx_path.text(), suppress=self.suppress_stderr)
+        self.pusher = PushStreamer(self.ffmpeg_path.text(), suppress=self.suppress_stderr)
         for srv in (self.mediamtx, self.pusher):
             srv.log.connect(self._log)
 
         self.mediamtx.started.connect(lambda _: self._log("MediaMTX started"))
         self.pusher.started.connect(lambda url: self._log("FFmpeg push started to: "+url))
 
-        self.recorder = RecorderProc()
+        self.recorder = RecorderProc(suppress=self.suppress_stderr)
         self.recorder.log.connect(self._log)
         self.recorder.started.connect(lambda dst: (self._log(f"Recorder started -> {dst}"), self._set_rec_indicator(True)))
         self.recorder.stopped.connect(lambda dst: (self._log(f"Recorder stopped -> {dst}"), self._set_rec_indicator(False)))
@@ -230,6 +282,18 @@ class CameraModule(QtCore.QObject):
         self.btn_rec_start.clicked.connect(self._start_manual_record)
         self.btn_rec_stop.clicked.connect(self._stop_manual_record)
         self.btn_rec_folder.clicked.connect(lambda: open_folder(Path(self.rec_path.text().strip() or ".")))
+
+        # config changes
+        self.mediamtx_path.editingFinished.connect(self._save_app_cfg)
+        self.ffmpeg_path.editingFinished.connect(self._save_app_cfg)
+        self.ffprobe_path.editingFinished.connect(self._save_app_cfg)
+        self.ptz_cgi_port.valueChanged.connect(lambda _: self._save_app_cfg())
+        self.ptz_cgi_channel.valueChanged.connect(lambda _: self._save_app_cfg())
+        self.ptz_cgi_poll.valueChanged.connect(lambda _: self._save_app_cfg())
+        self.ptz_cgi_https.stateChanged.connect(lambda _: self._save_app_cfg())
+        self.hevc_guard.valueChanged.connect(lambda v: (setattr(self, 'hevc_guard_ms', v), self._save_app_cfg()))
+        self.prefer_h264_chk.stateChanged.connect(lambda _: (setattr(self, 'prefer_h264', self.prefer_h264_chk.isChecked()), self._save_app_cfg()))
+        self.suppress_stderr_chk.stateChanged.connect(lambda _: (setattr(self, 'suppress_stderr', self.suppress_stderr_chk.isChecked()), self._update_suppress(), self._save_app_cfg()))
 
         # ---------- Timer ----------
         self.t = QtCore.QTimer(self); self.t.timeout.connect(self._update_metrics); self.t.start(800)
@@ -421,7 +485,7 @@ class CameraModule(QtCore.QObject):
             url = self._compose_rtsp_url()
             codec = self._probe_codec(url, user, pwd)
             self._last_codec = codec
-            if codec in ("hevc", "h265"):
+            if self.prefer_h264 and codec in ("hevc", "h265"):
                 alt_path = self._guess_h264_alt_rtsp(self.rtsp_path.text().strip())
                 if alt_path:
                     alt_url = f"rtsp://{h}:{self.rtsp_port.value()}{alt_path}"
@@ -432,7 +496,7 @@ class CameraModule(QtCore.QObject):
             self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
             # פרסום הגדרות PTZ
             self._publish_ptz_cfg()
-            self._start_ptz_meta(h, int(self.onvif_port.value()), user, pwd)
+            self._start_ptz_meta(h, user, pwd)
             return
 
         # ONVIF → RTSP
@@ -443,7 +507,7 @@ class CameraModule(QtCore.QObject):
         url = res
         codec = self._probe_codec(url, user, pwd)
         self._last_codec = codec
-        if codec in ("hevc", "h265"):
+        if self.prefer_h264 and codec in ("hevc", "h265"):
             alt = self._guess_h264_alt_onvif(h, int(self.onvif_port.value()), user, pwd)
             if alt and self._probe_codec(alt, user, pwd) == "h264":
                 url = alt
@@ -451,7 +515,7 @@ class CameraModule(QtCore.QObject):
         self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
         # פרסום הגדרות PTZ
         self._publish_ptz_cfg()
-        self._start_ptz_meta(h, int(self.onvif_port.value()), user, pwd)
+        self._start_ptz_meta(h, user, pwd)
 
     # ===== Quick tools =====
     def _quick_check(self):
@@ -772,6 +836,10 @@ class CameraModule(QtCore.QObject):
             "rtsp_path": self.rtsp_path.text().strip(),
             "onvif_port": self.onvif_port.value(),
             "force_tcp": self.force_tcp.isChecked(),
+            "ptz_cgi_port": self.ptz_cgi_port.value(),
+            "ptz_cgi_channel": self.ptz_cgi_channel.value(),
+            "ptz_cgi_poll_hz": self.ptz_cgi_poll.value(),
+            "ptz_cgi_https": self.ptz_cgi_https.isChecked(),
         }
 
     def _apply_profile(self, p: dict):
@@ -789,6 +857,10 @@ class CameraModule(QtCore.QObject):
         self.rtsp_path.setText(p.get("rtsp_path","/cam/realmonitor?channel=1&subtype=1"))
         self.onvif_port.setValue(int(p.get("onvif_port",80)))
         self.force_tcp.setChecked(bool(p.get("force_tcp",True)))
+        self.ptz_cgi_port.setValue(int(p.get("ptz_cgi_port", self._cfg.get("ptz_cgi_port", 80))))
+        self.ptz_cgi_channel.setValue(int(p.get("ptz_cgi_channel", self._cfg.get("ptz_cgi_channel", 1))))
+        self.ptz_cgi_poll.setValue(float(p.get("ptz_cgi_poll_hz", self._cfg.get("ptz_cgi_poll_hz", 5.0))))
+        self.ptz_cgi_https.setChecked(bool(p.get("ptz_cgi_https", self._cfg.get("ptz_cgi_https", False))))
         # כשמיישמים פרופיל – נפרסם גם את הגדרות ה-PTZ (שימושי כשעוברים לטאב הבא)
         self._publish_ptz_cfg()
 
@@ -846,6 +918,31 @@ class CameraModule(QtCore.QObject):
         self._save_profiles(); self._refresh_profiles_combo()
         self.profile_name.clear(); self._log(f"Deleted profile: {name}")
 
+    def _save_app_cfg(self):
+        self._cfg.update({
+            "mediamtx_path": self.mediamtx_path.text().strip(),
+            "ffmpeg_path": self.ffmpeg_path.text().strip(),
+            "ffprobe_path": self.ffprobe_path.text().strip(),
+            "hevc_guard_ms": self.hevc_guard.value(),
+            "prefer_h264": self.prefer_h264_chk.isChecked(),
+            "suppress_stderr": self.suppress_stderr_chk.isChecked(),
+            "ptz_cgi_port": self.ptz_cgi_port.value(),
+            "ptz_cgi_channel": self.ptz_cgi_channel.value(),
+            "ptz_cgi_poll_hz": self.ptz_cgi_poll.value(),
+            "ptz_cgi_https": self.ptz_cgi_https.isChecked(),
+        })
+        save_cfg(self._cfg)
+        self.hevc_guard_ms = self.hevc_guard.value()
+        self.prefer_h264 = self.prefer_h264_chk.isChecked()
+        self.suppress_stderr = self.suppress_stderr_chk.isChecked()
+        self.mediamtx.mediamtx_path = self.mediamtx_path.text().strip()
+        self.pusher.ffmpeg_path = self.ffmpeg_path.text().strip()
+
+    def _update_suppress(self):
+        self.mediamtx.suppress = self.suppress_stderr
+        self.pusher.suppress = self.suppress_stderr
+        self.recorder.suppress = self.suppress_stderr
+
     # ---- logging ----
     def _log(self, s: str):
         red = redact(s)
@@ -876,7 +973,7 @@ class CameraModule(QtCore.QObject):
         except Exception as e:
             self._log(f"Failed to publish PTZ cfg: {e}")
 
-    def _start_ptz_meta(self, host: str, port: int, user: str, pwd: str):
+    def _start_ptz_meta(self, host: str, user: str, pwd: str):
         """מפעיל thread טלמטריית PTZ עם כתיבה ל-CSV."""
         if self._ptz_meta:
             try:
@@ -892,7 +989,8 @@ class CameraModule(QtCore.QObject):
             self._ptz_cgi = None
         try:
             csv_path = str(Path.cwd() / 'ptz_log.csv')
-            self._ptz_meta = PtzMetaThread(host, port, user, pwd, poll_hz=5.0,
+            onvif_port = int(self.onvif_port.value())
+            self._ptz_meta = PtzMetaThread(host, onvif_port, user, pwd, poll_hz=5.0,
                                           csv_path=csv_path)
             self._ptz_meta.start()
             self._log(f"PTZ telemetry logging -> {csv_path}")
@@ -900,8 +998,12 @@ class CameraModule(QtCore.QObject):
             self._log(f"Failed to start PTZ telemetry: {e}")
         try:
             csv_path2 = str(Path.cwd() / 'ptz_cgi_log.csv')
-            self._ptz_cgi = PtzCgiThread(host, port, user, pwd, poll_hz=5.0,
-                                         csv_path=csv_path2)
+            port = int(self.ptz_cgi_port.value())
+            chan = int(self.ptz_cgi_channel.value())
+            hz = float(self.ptz_cgi_poll.value())
+            https = self.ptz_cgi_https.isChecked()
+            self._ptz_cgi = PtzCgiThread(host, port, user, pwd, channel=chan,
+                                         poll_hz=hz, https=https, csv_path=csv_path2)
             self._ptz_cgi.start()
             self._log(f"PTZ CGI logging -> {csv_path2}")
         except Exception as e:

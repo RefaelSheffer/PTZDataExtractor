@@ -1,0 +1,33 @@
+{
+  "name": "site1_cam1",
+  "intrinsics": {
+    "width": 1280,
+    "height": 720,
+    "fx": 640.0000000000001,
+    "fy": 640.0000000000001,
+    "cx": 640.0,
+    "cy": 360.0,
+    "skew": 0.0
+  },
+  "pose": {
+    "x": 34.445,
+    "y": 31.385,
+    "z": 73.573,
+    "yaw_deg": 0.0,
+    "pitch_deg": 0.0,
+    "roll_deg": 0.0
+  },
+  "terrain_path": "C:/Users/Rentgen/rentgen_system/data/eretz_hplaot/dtm.tif",
+  "terrain_type": "mesh",
+  "meta": {
+    "up_axis": "Z-up (default)",
+    "scale_to_m": 1.0
+  },
+  "georef": {
+    "origin_lat": 0.0,
+    "origin_lon": 0.0,
+    "origin_alt": 0.0,
+    "yaw_site_deg": 0.0,
+    "projected_epsg": 4326
+  }
+}

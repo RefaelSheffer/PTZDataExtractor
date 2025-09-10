@@ -1,0 +1,13 @@
+[
+  {
+    "name": "tel_gama",
+    "mode": "RTSP",
+    "host": "46.210.116.83",
+    "user": "admin",
+    "pwd": "123456",
+    "rtsp_port": 554,
+    "rtsp_path": "/cam/realmonitor?channel=1&subtype=1",
+    "onvif_port": 8080,
+    "force_tcp": true
+  }
+]

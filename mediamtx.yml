@@ -1,0 +1,7 @@
+# auto-generated
+rtspEncryption: "no"
+rtspAddress: 127.0.0.1:8554
+rtspTransports: [tcp]
+paths:
+  all:
+    source: publisher

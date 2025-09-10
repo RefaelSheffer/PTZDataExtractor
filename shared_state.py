@@ -10,3 +10,6 @@ orthophoto_path: Optional[str] = None
 # נשמר כדי לצייר CAM גם בטאב Image→Ground
 # מבנה: {"x": float, "y": float, "epsg": int}
 camera_proj: Optional[Dict] = None
+
+# אחרון מצב וטלמטריית PTZ (מ-PtzMetaThread)
+ptz_meta: Optional[Dict] = None

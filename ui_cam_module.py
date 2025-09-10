@@ -4,7 +4,7 @@
 # Camera connection module (UI) that plugs into the generic shell.
 # Relies on camera_io backend and ui_common helpers.
 
-import platform, subprocess, time, json, datetime, socket
+import platform, subprocess, time, json, datetime, socket, re
 from pathlib import Path
 from typing import List, Callable, Optional
 
@@ -15,7 +15,7 @@ from camera_io import (
     which,
     MediaMtxServer, PushStreamer, RecorderProc,
     probe_rtsp, sanitize_host, parse_host_from_rtsp,
-    onvif_get_rtsp_uri
+    onvif_get_rtsp_uri, ONVIFCamera
 )
 
 from ui_common import VlcVideoWidget, default_vlc_path, open_folder
@@ -324,6 +324,45 @@ class CameraModule(QtCore.QObject):
             return f"{sch}://{user}:{pwd}@{rest}"
         return url
 
+    def _probe_codec(self, url: str, user: str, pwd: str) -> str:
+        ffprobe = self.ffprobe_path.text().strip() or which("ffprobe") or "ffprobe"
+        ok, msg = probe_rtsp(ffprobe, url, user, pwd,
+                             prefer_tcp=self.force_tcp.isChecked(), timeout_ms=3500)
+        self._log(f"Probe {url} -> {msg}")
+        if ok:
+            m = re.search(r"\(([^)]+)\)", msg)
+            if m:
+                return m.group(1).strip().lower()
+        return ""
+
+    def _guess_h264_alt_rtsp(self, path: str) -> Optional[str]:
+        if "subtype=" in path and "subtype=1" not in path:
+            return re.sub(r"subtype=\d", "subtype=1", path, count=1)
+        m = re.search(r"/Streaming/Channels/\d{3}", path, re.IGNORECASE)
+        if m and not m.group(0).endswith("101"):
+            return re.sub(r"/Streaming/Channels/\d{3}", "/Streaming/Channels/101", path, count=1, flags=re.IGNORECASE)
+        return None
+
+    def _guess_h264_alt_onvif(self, host: str, port: int, user: str, pwd: str) -> Optional[str]:
+        if ONVIFCamera is None:
+            return None
+        try:
+            cam = ONVIFCamera(host, port, user, pwd)
+            media = cam.create_media_service()
+            for prof in media.GetProfiles():
+                try:
+                    enc = getattr(prof.VideoEncoderConfiguration, "Encoding", "")
+                    if str(enc).upper() == "H264":
+                        params = media.create_type('GetStreamUri')
+                        params.StreamSetup = {'Stream':'RTP-Unicast','Transport':{'Protocol':'RTSP'}}
+                        params.ProfileToken = prof.token
+                        return media.GetStreamUri(params).Uri
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return None
+
     def _connect_real(self):
         mode = self.real_mode.currentText()
         host_in = self.host.text().strip()
@@ -334,11 +373,14 @@ class CameraModule(QtCore.QObject):
 
         if mode.startswith("RTSP"):
             url = self._compose_rtsp_url()
-            ffprobe = self.ffprobe_path.text().strip() or which("ffprobe") or "ffprobe"
-            ok, msg = probe_rtsp(ffprobe, url, user, pwd, prefer_tcp=self.force_tcp.isChecked(), timeout_ms=3500)
-            self._log(f"Probe {url} -> {msg}")
-            if not ok and ("Unauthorized" in msg or "Forbidden" in msg or "Not Found" in msg):
-                QtWidgets.QMessageBox.warning(self._root,"RTSP check", msg)
+            codec = self._probe_codec(url, user, pwd)
+            if codec in ("hevc", "h265"):
+                alt_path = self._guess_h264_alt_rtsp(self.rtsp_path.text().strip())
+                if alt_path:
+                    alt_url = f"rtsp://{h}:{self.rtsp_port.value()}{alt_path}"
+                    if self._probe_codec(alt_url, user, pwd) == "h264":
+                        self.rtsp_path.setText(alt_path)
+                        url = alt_url
             self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
             # פרסום הגדרות PTZ
             self._publish_ptz_cfg()
@@ -349,8 +391,13 @@ class CameraModule(QtCore.QObject):
         if not ok:
             QtWidgets.QMessageBox.critical(self._root, "ONVIF error", res)
             return
-        self._log("ONVIF URI: " + res)
-        self._start_player(res, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
+        url = res
+        codec = self._probe_codec(url, user, pwd)
+        if codec in ("hevc", "h265"):
+            alt = self._guess_h264_alt_onvif(h, int(self.onvif_port.value()), user, pwd)
+            if alt and self._probe_codec(alt, user, pwd) == "h264":
+                url = alt
+        self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
         # פרסום הגדרות PTZ
         self._publish_ptz_cfg()
 

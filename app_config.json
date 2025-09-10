@@ -1,0 +1,12 @@
+{
+  "mediamtx_path": "",
+  "ffmpeg_path": "",
+  "ffprobe_path": "",
+  "hevc_guard_ms": 4000,
+  "prefer_h264": false,
+  "suppress_stderr": false,
+  "ptz_cgi_port": 80,
+  "ptz_cgi_channel": 1,
+  "ptz_cgi_poll_hz": 5.0,
+  "ptz_cgi_https": false
+}

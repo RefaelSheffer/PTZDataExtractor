@@ -107,14 +107,15 @@ def kill_existing_mediamtx():
 class BaseProc(QtCore.QObject):
     log = QtCore.Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, suppress: bool = False, parent=None):
         super().__init__(parent)
         self.proc: Optional[subprocess.Popen] = None
         self._reader: Optional[threading.Thread] = None
         self._stop_reader = False
+        self.suppress = suppress
 
     def _start_reader(self):
-        if not self.proc or (self.proc.stdout is None):
+        if self.suppress or not self.proc or (self.proc.stdout is None):
             return
         self._stop_reader = False
 
@@ -156,8 +157,8 @@ class BaseRtspServer(BaseProc):
 
 # ------------------- MediaMTX + FFmpeg push -------------------
 class MediaMtxServer(BaseRtspServer):
-    def __init__(self, mediamtx_path: str, parent=None):
-        super().__init__(parent)
+    def __init__(self, mediamtx_path: str, suppress: bool = False, parent=None):
+        super().__init__(suppress, parent)
         self.mediamtx_path = mediamtx_path
         self.port = 8554
 
@@ -168,20 +169,22 @@ class MediaMtxServer(BaseRtspServer):
             self.port = find_free_rtsp_port(desired_port + attempt)
             ensure_mediamtx_config(self.mediamtx_path, self.port)
             try:
-                self.proc = subprocess.Popen(
-                    [self.mediamtx_path],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    cwd=str(Path(self.mediamtx_path).parent),
-                    creationflags=(
+                kw = {
+                    "cwd": str(Path(self.mediamtx_path).parent),
+                    "creationflags": (
                         getattr(subprocess, "CREATE_NO_WINDOW", 0)
                         if platform.system() == "Windows"
                         else 0
                     ),
-                )
-                self.log.emit("Launching MediaMTX:")
-                self.log.emit(self.mediamtx_path)
+                }
+                if self.suppress:
+                    kw.update(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    kw.update(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                self.proc = subprocess.Popen([self.mediamtx_path], **kw)
+                if not self.suppress:
+                    self.log.emit("Launching MediaMTX:")
+                    self.log.emit(self.mediamtx_path)
                 self._start_reader()
             except Exception as e:
                 self.failed.emit(f"Failed to start MediaMTX: {e}")
@@ -199,11 +202,11 @@ class MediaMtxServer(BaseRtspServer):
 
 class PushStreamer(BaseProc):
     started = QtCore.Signal(str)
-    failed  = QtCore.Signal(str)
+    failed = QtCore.Signal(str)
     stopped = QtCore.Signal()
 
-    def __init__(self, ffmpeg_path: str, parent=None):
-        super().__init__(parent)
+    def __init__(self, ffmpeg_path: str, suppress: bool = False, parent=None):
+        super().__init__(suppress, parent)
         self.ffmpeg_path = ffmpeg_path
 
     def start(self, file_path: str, url: str) -> bool:
@@ -216,12 +219,21 @@ class PushStreamer(BaseProc):
             "-an", "-f", "rtsp", "-rtsp_transport", "tcp", url
         ]
         try:
-            self.proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if platform.system()=="Windows" else 0)
-            )
-            self.log.emit("Launching FFmpeg push:")
-            self.log.emit(" ".join(cmd))
+            kw = {
+                "creationflags": (
+                    getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    if platform.system() == "Windows"
+                    else 0
+                )
+            }
+            if self.suppress:
+                kw.update(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                kw.update(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            self.proc = subprocess.Popen(cmd, **kw)
+            if not self.suppress:
+                self.log.emit("Launching FFmpeg push:")
+                self.log.emit(" ".join(cmd))
             self._start_reader()
             self.started.emit(url)
             return True
@@ -308,10 +320,10 @@ def parse_host_from_rtsp(url: str) -> str:
 class RecorderProc(BaseProc):
     started = QtCore.Signal(str)   # dst path
     stopped = QtCore.Signal(str)   # dst path
-    failed  = QtCore.Signal(str)   # message
+    failed = QtCore.Signal(str)   # message
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def __init__(self, suppress: bool = False, parent=None):
+        super().__init__(suppress, parent)
         self.dst: Optional[Path] = None
 
     def is_active(self) -> bool:
@@ -337,13 +349,22 @@ class RecorderProc(BaseProc):
             cmd += ["-f", "mpegts", str(dst_path)]
 
         try:
-            self.proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if platform.system()=="Windows" else 0)
-            )
+            kw = {
+                "creationflags": (
+                    getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    if platform.system() == "Windows"
+                    else 0
+                )
+            }
+            if self.suppress:
+                kw.update(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                kw.update(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            self.proc = subprocess.Popen(cmd, **kw)
             self._start_reader()
-            self.log.emit("Launching FFmpeg recorder:")
-            self.log.emit(" ".join(cmd))
+            if not self.suppress:
+                self.log.emit("Launching FFmpeg recorder:")
+                self.log.emit(" ".join(cmd))
             self.started.emit(str(dst_path))
         except Exception as e:
             self.failed.emit(f"Failed to start recorder: {e}")

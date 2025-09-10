@@ -3,6 +3,8 @@
 # -*- coding: utf-8 -*-
 # Camera connection module (UI) that plugs into the generic shell.
 # Relies on camera_io backend and ui_common helpers.
+# Mock RTSP relies on a hardened MediaMTX server that auto-picks a free
+# port, writes a matching config and loops FFmpeg pushes for low latency.
 
 import platform, subprocess, time, json, datetime, socket, re
 from pathlib import Path

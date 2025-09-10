@@ -84,12 +84,23 @@ paths:
 
 
 def kill_existing_mediamtx():
-    if platform.system() == "Windows":
-        try:
-            subprocess.run(["taskkill", "/F", "/IM", "mediamtx.exe"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+    """Try to terminate any leftover MediaMTX processes quietly."""
+    try:
+        if platform.system() == "Windows":
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "mediamtx.exe"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            # Best effort; ignore return codes if process not found
+            subprocess.run(
+                ["pkill", "-f", "mediamtx"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+    except Exception:
+        pass
 
 
 # ------------------- Base process -------------------
@@ -152,16 +163,22 @@ class MediaMtxServer(BaseRtspServer):
 
     def start(self, desired_port: int = 8554) -> Tuple[bool, int]:
         self.stop()
-        kill_existing_mediamtx()
         for attempt in range(3):
-            self.port = find_free_rtsp_port(desired_port + attempt, max_tries=1)
+            kill_existing_mediamtx()
+            self.port = find_free_rtsp_port(desired_port + attempt)
             ensure_mediamtx_config(self.mediamtx_path, self.port)
             try:
                 self.proc = subprocess.Popen(
                     [self.mediamtx_path],
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
                     cwd=str(Path(self.mediamtx_path).parent),
-                    creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if platform.system()=="Windows" else 0)
+                    creationflags=(
+                        getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                        if platform.system() == "Windows"
+                        else 0
+                    ),
                 )
                 self.log.emit("Launching MediaMTX:")
                 self.log.emit(self.mediamtx_path)

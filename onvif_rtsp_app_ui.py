@@ -13,6 +13,7 @@ from typing import List, Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 import vlc
+from ui_common import redact
 
 from camera_io import (
     which,
@@ -907,7 +908,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ===== Logs =====
     def _log(self, s: str):
-        self.logs.appendPlainText(f"{time.strftime('%H:%M:%S')}  {s}")
+        self.logs.appendPlainText(f"{time.strftime('%H:%M:%S')}  {redact(s)}")
 
 
 # ------------------- main -------------------

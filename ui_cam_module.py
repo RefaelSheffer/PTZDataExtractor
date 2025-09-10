@@ -22,7 +22,7 @@ from camera_io import (
 from onvif_ptz import PtzMetaThread
 from ptz_cgi import PtzCgiThread
 
-from ui_common import VlcVideoWidget, default_vlc_path, open_folder
+from ui_common import VlcVideoWidget, default_vlc_path, open_folder, redact
 import shared_state  # <<< לשיתוף הגדרות ה-PTZ עם מודולים אחרים
 
 APP_DIR = Path(__file__).resolve().parent
@@ -848,7 +848,8 @@ class CameraModule(QtCore.QObject):
 
     # ---- logging ----
     def _log(self, s: str):
-        line = f"{time.strftime('%H:%M:%S')}  {s}"
+        red = redact(s)
+        line = f"{time.strftime('%H:%M:%S')}  {red}"
         try:
             self.logs.appendPlainText(line)  # local pane
         except Exception:

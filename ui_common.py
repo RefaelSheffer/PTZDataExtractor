@@ -3,7 +3,7 @@
 # -*- coding: utf-8 -*-
 # Common UI helpers and widgets reused across modules.
 
-import platform, subprocess
+import platform, subprocess, re
 from pathlib import Path
 from PySide6 import QtCore, QtWidgets
 import vlc
@@ -25,6 +25,17 @@ def open_folder(folder: Path):
             subprocess.Popen(["xdg-open", str(folder)])
     except Exception:
         pass
+
+
+def redact(text: str) -> str:
+    """Mask credentials and IPv4 addresses in any log line."""
+    if not text:
+        return text
+    # Mask user:pass in RTSP URLs
+    text = re.sub(r'rtsp://([^:@/\s]+):([^@/\s]+)@', r'rtsp://[USER]:[***]@', text)
+    # Mask IPv4 addresses
+    text = re.sub(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', '[IP]', text)
+    return text
 
 class VlcVideoWidget(QtWidgets.QFrame):
     """Reusable VLC video surface for embedding into modules."""

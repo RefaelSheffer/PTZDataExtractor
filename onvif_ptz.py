@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 import threading
 import time
+import csv
+import math
 
 # דרוש: pip install onvif-zeep
 from onvif import ONVIFCamera
@@ -181,3 +183,141 @@ class OnvifPTZClient:
                 pass
 
             time.sleep(self.poll_dt)
+
+
+@dataclass
+class PTZMeta(PTZReading):
+    """מצב PTZ + נגזרות וחישובי HFOV."""
+    ts: float = 0.0                       # זמן UNIX
+    pan_dps: Optional[float] = None       # מעלות/שניה
+    tilt_dps: Optional[float] = None      # מעלות/שניה
+    zoom_speed: Optional[float] = None    # mm/s או norm/s
+    hfov_deg: Optional[float] = None      # שדה ראיה אופקי מחושב
+
+
+class PtzMetaThread:
+    """
+    Thread ייעודי שמבצע polling ל-PTZ ומחשב נגזרות + HFOV.
+    יכול גם לכתוב לקובץ CSV.
+    """
+    def __init__(self, host: str, port: int, user: str, pwd: str,
+                 profile_index: int = 0, poll_hz: float = 5.0,
+                 sensor_width_mm: float = 6.4, csv_path: Optional[str] = None):
+        self._client = OnvifPTZClient(host, port, user, pwd,
+                                      profile_index=profile_index, poll_hz=poll_hz)
+        self._sensor_width_mm = sensor_width_mm
+        self._csv_path = csv_path
+        self._csv_file = None
+        self._csv_writer = None
+        self._last: Optional[PTZMeta] = None
+        self._th: Optional[threading.Thread] = None
+        self._stop = threading.Event()
+
+    def start(self):
+        self._client.start()
+        self._stop.clear()
+        self._th = threading.Thread(target=self._run, daemon=True)
+        self._th.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._th:
+            self._th.join(timeout=2.0)
+            self._th = None
+        self._client.stop()
+        if self._csv_file:
+            try:
+                self._csv_file.close()
+            except Exception:
+                pass
+            self._csv_file = None
+            self._csv_writer = None
+
+    def last(self) -> Optional[PTZMeta]:
+        return self._last
+
+    # ----- internal -----
+    def _run(self):
+        prev: Optional[PTZMeta] = None
+        if self._csv_path:
+            try:
+                self._csv_file = open(self._csv_path, 'w', newline='', encoding='utf-8')
+                self._csv_writer = csv.writer(self._csv_file)
+                self._csv_writer.writerow([
+                    'ts', 'pan_deg', 'tilt_deg', 'zoom',
+                    'pan_dps', 'tilt_dps', 'zoom_speed', 'hfov_deg'
+                ])
+            except Exception:
+                self._csv_file = None
+                self._csv_writer = None
+
+        while not self._stop.is_set():
+            r = self._client.last()
+            ts = time.time()
+
+            pan_deg = r.pan_deg
+            tilt_deg = r.tilt_deg
+            zoom_mm = r.zoom_mm
+            zoom_norm = r.zoom_norm
+
+            pan_dps = tilt_dps = zoom_speed = hfov_deg = None
+            if prev is not None:
+                dt = ts - prev.ts
+                if dt > 0:
+                    if pan_deg is not None and prev.pan_deg is not None:
+                        pan_dps = (pan_deg - prev.pan_deg) / dt
+                    if tilt_deg is not None and prev.tilt_deg is not None:
+                        tilt_dps = (tilt_deg - prev.tilt_deg) / dt
+                    if zoom_mm is not None and prev.zoom_mm is not None:
+                        zoom_speed = (zoom_mm - prev.zoom_mm) / dt
+                    elif zoom_norm is not None and prev.zoom_norm is not None:
+                        zoom_speed = (zoom_norm - prev.zoom_norm) / dt
+
+            if zoom_mm is not None and self._sensor_width_mm > 0:
+                try:
+                    hfov_deg = math.degrees(2.0 * math.atan(self._sensor_width_mm / (2.0 * zoom_mm)))
+                except Exception:
+                    hfov_deg = None
+
+            meta = PTZMeta(ts=ts, pan_deg=pan_deg, tilt_deg=tilt_deg,
+                           zoom_norm=zoom_norm, zoom_mm=zoom_mm,
+                           pan_dps=pan_dps, tilt_dps=tilt_dps,
+                           zoom_speed=zoom_speed, hfov_deg=hfov_deg,
+                           focus_pos=r.focus_pos)
+            self._last = meta
+
+            try:
+                import shared_state
+                shared_state.ptz_meta = {
+                    'ts': meta.ts,
+                    'pan_deg': meta.pan_deg,
+                    'tilt_deg': meta.tilt_deg,
+                    'zoom_mm': meta.zoom_mm,
+                    'zoom_norm': meta.zoom_norm,
+                    'pan_dps': meta.pan_dps,
+                    'tilt_dps': meta.tilt_dps,
+                    'zoom_speed': meta.zoom_speed,
+                    'hfov_deg': meta.hfov_deg,
+                    'focus_pos': meta.focus_pos,
+                }
+            except Exception:
+                pass
+
+            if self._csv_writer:
+                try:
+                    self._csv_writer.writerow([
+                        ts,
+                        pan_deg,
+                        tilt_deg,
+                        zoom_mm if zoom_mm is not None else zoom_norm,
+                        pan_dps,
+                        tilt_dps,
+                        zoom_speed,
+                        hfov_deg,
+                    ])
+                    self._csv_file.flush()
+                except Exception:
+                    pass
+
+            prev = meta
+            time.sleep(self._client.poll_dt)

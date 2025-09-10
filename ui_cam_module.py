@@ -17,6 +17,7 @@ from camera_io import (
     probe_rtsp, sanitize_host, parse_host_from_rtsp,
     onvif_get_rtsp_uri, ONVIFCamera
 )
+from onvif_ptz import PtzMetaThread
 
 from ui_common import VlcVideoWidget, default_vlc_path, open_folder
 import shared_state  # <<< לשיתוף הגדרות ה-PTZ עם מודולים אחרים
@@ -43,6 +44,7 @@ class CameraModule(QtCore.QObject):
         self.hevc_guard_ms = 4000
         self._hevc_guard_tried = False
         self._last_codec = ""
+        self._ptz_meta: Optional[PtzMetaThread] = None
 
     # ---- public API for the shell ----
     def widget(self) -> QtWidgets.QWidget:
@@ -389,6 +391,7 @@ class CameraModule(QtCore.QObject):
             self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
             # פרסום הגדרות PTZ
             self._publish_ptz_cfg()
+            self._start_ptz_meta(h, int(self.onvif_port.value()), user, pwd)
             return
 
         # ONVIF → RTSP
@@ -407,6 +410,7 @@ class CameraModule(QtCore.QObject):
         self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
         # פרסום הגדרות PTZ
         self._publish_ptz_cfg()
+        self._start_ptz_meta(h, int(self.onvif_port.value()), user, pwd)
 
     # ===== Quick tools =====
     def _quick_check(self):
@@ -491,6 +495,12 @@ class CameraModule(QtCore.QObject):
             self.video.player().stop()
         except Exception:
             pass
+        if self._ptz_meta:
+            try:
+                self._ptz_meta.stop()
+            except Exception:
+                pass
+            self._ptz_meta = None
 
     def _start_manual_record(self):
         if self.recorder.is_active():
@@ -756,3 +766,20 @@ class CameraModule(QtCore.QObject):
             self._log("Shared PTZ cfg published.")
         except Exception as e:
             self._log(f"Failed to publish PTZ cfg: {e}")
+
+    def _start_ptz_meta(self, host: str, port: int, user: str, pwd: str):
+        """מפעיל thread טלמטריית PTZ עם כתיבה ל-CSV."""
+        if self._ptz_meta:
+            try:
+                self._ptz_meta.stop()
+            except Exception:
+                pass
+            self._ptz_meta = None
+        try:
+            csv_path = str(Path.cwd() / 'ptz_log.csv')
+            self._ptz_meta = PtzMetaThread(host, port, user, pwd, poll_hz=5.0,
+                                          csv_path=csv_path)
+            self._ptz_meta.start()
+            self._log(f"PTZ telemetry logging -> {csv_path}")
+        except Exception as e:
+            self._log(f"Failed to start PTZ telemetry: {e}")

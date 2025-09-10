@@ -17,6 +17,7 @@ from camera_io import (
     probe_rtsp, sanitize_host, parse_host_from_rtsp,
     onvif_get_rtsp_uri, ONVIFCamera
 )
+from onvif_ptz import PtzMetaThread
 
 APP_DIR = Path(__file__).resolve().parent
 PROFILES_PATH = APP_DIR / "profiles.json"
@@ -95,6 +96,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.hevc_guard_ms = 4000
         self._hevc_guard_tried = False
         self._last_codec = ""
+        self._ptz_meta: Optional[PtzMetaThread] = None
 
         # ---------- Mock page ----------
         mock = QtWidgets.QWidget(); ml = QtWidgets.QGridLayout(mock)
@@ -417,6 +419,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         url = alt_url
             self._hevc_guard_tried = False
             self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
+            self._start_ptz_meta(h, int(self.onvif_port.value()), user, pwd)
             return
 
         # ONVIF → RTSP
@@ -433,6 +436,23 @@ class MainWindow(QtWidgets.QMainWindow):
                 url = alt
         self._hevc_guard_tried = False
         self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
+        self._start_ptz_meta(h, int(self.onvif_port.value()), user, pwd)
+
+    def _start_ptz_meta(self, host: str, port: int, user: str, pwd: str):
+        if self._ptz_meta:
+            try:
+                self._ptz_meta.stop()
+            except Exception:
+                pass
+            self._ptz_meta = None
+        try:
+            csv_path = str(Path.cwd() / 'ptz_log.csv')
+            self._ptz_meta = PtzMetaThread(host, port, user, pwd, poll_hz=5.0,
+                                           csv_path=csv_path)
+            self._ptz_meta.start()
+            print(f"PTZ telemetry logging -> {csv_path}")
+        except Exception as e:
+            print(f"Failed to start PTZ telemetry: {e}")
 
     # ===== Quick tools =====
     def _quick_check(self):
@@ -518,6 +538,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.video.player().stop()
         except Exception:
             pass
+        if self._ptz_meta:
+            try:
+                self._ptz_meta.stop()
+            except Exception:
+                pass
+            self._ptz_meta = None
 
     def _start_manual_record(self):
         if self.recorder.is_active():

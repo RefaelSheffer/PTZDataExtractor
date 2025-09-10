@@ -100,6 +100,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ptz_meta: Optional[PtzMetaThread] = None
         self._ptz_cgi: Optional[PtzCgiThread] = None
 
+        # Auto-retry state for preview
+        self._retry_url = ""
+        self._retry_force_tcp = True
+        self._retry_user = ""
+        self._retry_pwd = ""
+        self._retry_attempts = 0
+        self._retry_pending = False
+
+        # Auto-retry state for recorder
+        self._rec_params: Optional[tuple] = None
+        self._rec_retry_attempts = 0
+        self._rec_retry_pending = False
+
         # ---------- Mock page ----------
         mock = QtWidgets.QWidget(); ml = QtWidgets.QGridLayout(mock)
         self.mediamtx_path = QtWidgets.QLineEdit(str(Path.cwd() / "mediamtx.exe"))
@@ -544,7 +557,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "External VLC", f"Failed to launch VLC:\n{e}")
 
     # ===== Player / Record =====
-    def _start_player(self, url: str, force_tcp: bool=True, user: str="", pwd: str=""):
+    def _start_player(self, url: str, force_tcp: bool=True, user: str="", pwd: str="", reset_retry: bool=True):
         try:
             self.video.player().stop()
         except Exception:
@@ -566,6 +579,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.video.player().set_media(media)
         self.video.player().play()
         self._log("Player started: " + final_url)
+
+        # remember params for auto-retry
+        self._retry_url = url
+        self._retry_force_tcp = force_tcp
+        self._retry_user = user
+        self._retry_pwd = pwd
+        if reset_retry:
+            self._retry_attempts = 0
+        self._retry_pending = False
 
         if self.chk_record_auto.isChecked():
             QtCore.QTimer.singleShot(300, self._start_manual_record)
@@ -591,6 +613,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
             self._ptz_cgi = None
 
+        # cancel auto-retry
+        self._retry_url = ""
+        self._retry_attempts = 0
+        self._retry_pending = False
+
     def _start_manual_record(self):
         if self.recorder.is_active():
             QtWidgets.QMessageBox.information(self, "Record", "Recorder already running.")
@@ -615,6 +642,9 @@ class MainWindow(QtWidgets.QMainWindow):
             out_path.parent.mkdir(parents=True, exist_ok=True)
 
         self.recorder.start_record(ffmpeg, url, out_path, self.force_tcp.isChecked(), fmt)
+        self._rec_params = (ffmpeg, url, out_path, self.force_tcp.isChecked(), fmt)
+        self._rec_retry_attempts = 0
+        self._rec_retry_pending = False
         self.btn_rec_start.setEnabled(False); self.btn_rec_stop.setEnabled(True)
 
     def _stop_manual_record(self):
@@ -622,6 +652,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.recorder.stop()
         self.btn_rec_start.setEnabled(True); self.btn_rec_stop.setEnabled(False)
+        self._rec_params = None
+        self._rec_retry_attempts = 0
+        self._rec_retry_pending = False
 
     def _set_rec_indicator(self, on: bool):
         if on:
@@ -655,6 +688,48 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
         self.metrics.setText(f"State: {st} | {w}x{h} | FPS:{fps:.1f} | in:{in_kbps} kbps | demux:{demux_kbps} kbps")
+
+        # Auto-retry preview if VLC stopped
+        if st == vlc.State.Playing:
+            self._retry_attempts = 0
+        elif st in (vlc.State.Ended, vlc.State.Error, vlc.State.Stopped):
+            if self._retry_url and not self._retry_pending:
+                delay = min(30000, 1000 * (2 ** self._retry_attempts))
+                self._retry_attempts += 1
+                self._retry_pending = True
+                self._log(f"Player state {st} -> retry {self._retry_attempts} in {delay/1000:.1f}s")
+                QtCore.QTimer.singleShot(delay, self._retry_player)
+
+        # Auto-retry recorder if process died
+        if self._rec_params:
+            proc = self.recorder.proc
+            if proc and proc.poll() is None:
+                self._rec_retry_attempts = 0
+            elif proc and proc.poll() is not None:
+                self._log("Recorder stopped unexpectedly")
+                self.recorder.stop()
+                if not self._rec_retry_pending:
+                    delay = min(30000, 1000 * (2 ** self._rec_retry_attempts))
+                    self._rec_retry_attempts += 1
+                    self._rec_retry_pending = True
+                    self._log(f"Retrying recorder in {delay/1000:.1f}s (attempt {self._rec_retry_attempts})")
+                    QtCore.QTimer.singleShot(delay, self._retry_recorder)
+
+    def _retry_player(self):
+        self._retry_pending = False
+        if not self._retry_url:
+            return
+        self._log("Retrying player...")
+        self._start_player(self._retry_url, force_tcp=self._retry_force_tcp,
+                           user=self._retry_user, pwd=self._retry_pwd, reset_retry=False)
+
+    def _retry_recorder(self):
+        self._rec_retry_pending = False
+        if not self._rec_params:
+            return
+        ffmpeg, url, out_path, force_tcp, fmt = self._rec_params
+        self.recorder.start_record(ffmpeg, url, out_path, force_tcp, fmt)
+        self._log(f"Recording -> {out_path}")
 
     # ===== HEVC guard =====
     def _hevc_guard_check(self):

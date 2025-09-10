@@ -18,6 +18,7 @@ from camera_io import (
     onvif_get_rtsp_uri, ONVIFCamera
 )
 from onvif_ptz import PtzMetaThread
+from ptz_cgi import PtzCgiThread
 
 from ui_common import VlcVideoWidget, default_vlc_path, open_folder
 import shared_state  # <<< לשיתוף הגדרות ה-PTZ עם מודולים אחרים
@@ -45,6 +46,7 @@ class CameraModule(QtCore.QObject):
         self._hevc_guard_tried = False
         self._last_codec = ""
         self._ptz_meta: Optional[PtzMetaThread] = None
+        self._ptz_cgi: Optional[PtzCgiThread] = None
 
     # ---- public API for the shell ----
     def widget(self) -> QtWidgets.QWidget:
@@ -501,6 +503,12 @@ class CameraModule(QtCore.QObject):
             except Exception:
                 pass
             self._ptz_meta = None
+        if self._ptz_cgi:
+            try:
+                self._ptz_cgi.stop()
+            except Exception:
+                pass
+            self._ptz_cgi = None
 
     def _start_manual_record(self):
         if self.recorder.is_active():
@@ -775,6 +783,12 @@ class CameraModule(QtCore.QObject):
             except Exception:
                 pass
             self._ptz_meta = None
+        if self._ptz_cgi:
+            try:
+                self._ptz_cgi.stop()
+            except Exception:
+                pass
+            self._ptz_cgi = None
         try:
             csv_path = str(Path.cwd() / 'ptz_log.csv')
             self._ptz_meta = PtzMetaThread(host, port, user, pwd, poll_hz=5.0,
@@ -783,3 +797,11 @@ class CameraModule(QtCore.QObject):
             self._log(f"PTZ telemetry logging -> {csv_path}")
         except Exception as e:
             self._log(f"Failed to start PTZ telemetry: {e}")
+        try:
+            csv_path2 = str(Path.cwd() / 'ptz_cgi_log.csv')
+            self._ptz_cgi = PtzCgiThread(host, port, user, pwd, poll_hz=5.0,
+                                         csv_path=csv_path2)
+            self._ptz_cgi.start()
+            self._log(f"PTZ CGI logging -> {csv_path2}")
+        except Exception as e:
+            self._log(f"Failed to start PTZ CGI telemetry: {e}")

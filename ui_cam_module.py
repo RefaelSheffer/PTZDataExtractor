@@ -287,33 +287,57 @@ class CameraModule(QtCore.QObject):
     # ===== Real =====
     def _auto_try_dahua(self):
         host, hp, pp = sanitize_host(self.host.text())
-        if hp: self.rtsp_port.setValue(hp)
-        if pp: self.rtsp_path.setText(pp)
+        if hp:
+            self.rtsp_port.setValue(hp)
+        if pp:
+            self.rtsp_path.setText(pp)
         host = host.strip(); user = self.user.text().strip(); pwd = self.pwd.text().strip()
-        ports = [self.rtsp_port.value()] + [p for p in (554,5544,8554) if p!=self.rtsp_port.value()]
-        paths = [
-            "/cam/realmonitor?channel={ch}&subtype={st}",
-            "/Streaming/Channels/10{ch-1}",
-            "/Streaming/Channels/101"
-        ]
-        chans = [1,2,3,4]; subs = [1,0]
         ffprobe = self.ffprobe_path.text().strip() or which("ffprobe") or "ffprobe"
+        forbidden = 0
+
+        urls: List[str] = []
+        ok, uri = onvif_get_rtsp_uri(host, int(self.onvif_port.value()), user, pwd)
+        if ok and uri:
+            urls.append(uri)
+
+        ports = [self.rtsp_port.value()] + [p for p in (554, 5544, 8554, 10554, 7070) if p != self.rtsp_port.value()]
+        chans = list(range(1, 9))
+        subs = [0, 1, 2]
         for port in ports:
             for ch in chans:
                 for st in subs:
-                    for pat in paths:
-                        path = pat.replace("{ch-1}", str(ch-1)).format(ch=ch, st=st)
-                        url = f"rtsp://{host}:{port}{path}"
-                        ok, msg = probe_rtsp(ffprobe, url, user, pwd, prefer_tcp=True, timeout_ms=3500)
-                        self._log(f"Probe {url} -> {msg}")
-                        if ok:
-                            self.rtsp_port.setValue(port); self.rtsp_path.setText(path)
-                            self._start_player(url, force_tcp=True, user=user, pwd=pwd)
-                            # פרסום הגדרות PTZ ללשונית Image→Ground
-                            self._publish_ptz_cfg()
-                            QtWidgets.QMessageBox.information(self._root,"Auto-try", f"Connected: {url}")
-                            return
-        QtWidgets.QMessageBox.information(self._root,"Auto-try","No RTSP URL worked (check permissions/ONVIF/stream settings).")
+                    paths = [
+                        f"/cam/realmonitor?channel={ch}&subtype={st}",
+                        f"/cam/preview?channel={ch}&subtype={st}",
+                        f"/Streaming/Channels/{ch}0{st+1}",
+                        f"/Streaming/Channels/10{ch-1}",
+                    ]
+                    for path in paths:
+                        urls.append(f"rtsp://{host}:{port}{path}")
+
+        for url in urls:
+            ok, msg = probe_rtsp(ffprobe, url, user, pwd, prefer_tcp=True, timeout_ms=3500)
+            self._log(f"Probe {url} -> {msg}")
+            if ok:
+                h, p, pa = sanitize_host(url)
+                if p:
+                    self.rtsp_port.setValue(p)
+                if pa:
+                    self.rtsp_path.setText(pa)
+                self._start_player(url, force_tcp=True, user=user, pwd=pwd)
+                # פרסום הגדרות PTZ ללשונית Image→Ground
+                self._publish_ptz_cfg()
+                QtWidgets.QMessageBox.information(self._root, "Auto-try", f"Connected: {url}")
+                return
+            low = msg.lower()
+            if "403" in msg or "forbidden" in low:
+                forbidden += 1
+                if forbidden >= 2:
+                    QtWidgets.QMessageBox.warning(self._root, "Auto-try", "Received multiple 403 Forbidden responses. Aborting to avoid lockout.")
+                    return
+
+        QtWidgets.QMessageBox.information(self._root, "Auto-try", "No RTSP URL worked (check permissions/ONVIF/stream settings).")
+
 
     def _compose_rtsp_url(self) -> str:
         host_in = self.host.text().strip()

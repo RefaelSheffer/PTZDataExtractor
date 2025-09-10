@@ -3,6 +3,9 @@
 # -*- coding: utf-8 -*-
 # UI for ONVIF/RTSP Simple App — split from monolith.
 # Depends on camera_io.py (backend).
+# Mock RTSP mode now uses a hardened MediaMTX server with automatic
+# port discovery, config generation and an endless low-latency FFmpeg
+# loop for pushing media.
 
 import sys, platform, subprocess, time, json, datetime, socket, re
 from pathlib import Path

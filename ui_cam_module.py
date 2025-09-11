@@ -955,6 +955,15 @@ class CameraModule(QtCore.QObject):
             "ptz_cgi_https": self.ptz_cgi_https.isChecked(),
         }
 
+    # Public helpers for project IO
+    def get_profile(self) -> dict:
+        """Return current camera connection settings as a profile dict."""
+        return self._profile_from_ui()
+
+    def apply_profile(self, p: dict) -> None:
+        """Populate the UI from a profile dict."""
+        self._apply_profile(p)
+
     def _apply_profile(self, p: dict):
         if not p:
             return

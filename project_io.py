@@ -66,7 +66,7 @@ def _expand_path(s: str, base: Path) -> str:
 
 # ---------------- public API ----------------
 
-def export_project(out_path: Path, profile_name: str, bundle_name: str,
+def export_project(out_path: Path, profile: Dict[str, Any] | str, bundle_name: str,
                    dtm_path: str, ortho_path: str, *,
                    profiles_path: Path = PROFILES_PATH,
                    srs: str = "EPSG:4326", project_name: str | None = None) -> Path:
@@ -76,34 +76,40 @@ def export_project(out_path: Path, profile_name: str, bundle_name: str,
     ----------
     out_path : Path
         Where to write the project file.
-    profile_name : str
-        Name of the profile to embed from the profiles JSON.
+    profile : dict or str
+        Either a profile dictionary to embed directly, or the name of a profile
+        that should be looked up in ``profiles.json``.
     bundle_name : str
         Name of the calibration bundle to embed (via camera_models).
     dtm_path, ortho_path : str
         Paths to raster layers referenced by the project.
     profiles_path : Path, optional
-        Location of the profiles JSON. Defaults to the repository-level
-        ``profiles.json``.
+        Location of the profiles JSON when ``profile`` is a string. Defaults to
+        the repository-level ``profiles.json``.
     srs : str, optional
         Spatial reference system code for the layers.
     project_name : str, optional
-        Human friendly name for the project. Defaults to ``profile_name``.
+        Human friendly name for the project. Defaults to the profile's name.
     """
     out_path = Path(out_path)
     base = out_path.parent
 
-    profiles = _load_profiles(profiles_path)
-    profile = next((p for p in profiles if p.get("name") == profile_name), None)
-    if profile is None:
-        raise ValueError(f"Profile '{profile_name}' not found in {profiles_path}")
+    # Resolve profile: allow passing a dict directly or a profile name
+    if isinstance(profile, str):
+        profiles = _load_profiles(profiles_path)
+        profile_dict = next((p for p in profiles if p.get("name") == profile), None)
+        if profile_dict is None:
+            raise ValueError(f"Profile '{profile}' not found in {profiles_path}")
+    else:
+        profile_dict = profile
+        profile = profile_dict.get("name", "profile")
 
     intr, pose, terrain_path, meta, georef = load_bundle(bundle_name)
 
     data: Dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
-        "name": project_name or profile_name,
-        "camera": profile,
+        "name": project_name or profile,
+        "camera": profile_dict,
         "bundle": {
             "name": bundle_name,
             "intrinsics": getattr(intr, "to_dict", lambda: intr)(),

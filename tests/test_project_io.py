@@ -8,11 +8,6 @@ from project_io import export_project, load_project
 
 
 def test_export_and_load_project(tmp_path, monkeypatch):
-    # Prepare fake profiles.json
-    profiles_path = tmp_path / "profiles.json"
-    profiles = [{"name": "cam1", "rtsp": {"url": "rtsp://example"}}]
-    profiles_path.write_text(json.dumps(profiles), encoding="utf-8")
-
     # Prepare bundle in temporary calibration directory
     cal_dir = tmp_path / "calibrations"
     cal_dir.mkdir()
@@ -27,7 +22,8 @@ def test_export_and_load_project(tmp_path, monkeypatch):
     ortho = tmp_path / "ortho.tif"; ortho.write_text("ortho")
 
     project_path = tmp_path / "scene.rtgproj"
-    export_project(project_path, "cam1", "b1", str(dtm), str(ortho), profiles_path=profiles_path)
+    profile = {"name": "cam1", "rtsp": {"url": "rtsp://example"}}
+    export_project(project_path, profile, "b1", str(dtm), str(ortho))
 
     data = load_project(project_path)
     assert data["camera"]["name"] == "cam1"

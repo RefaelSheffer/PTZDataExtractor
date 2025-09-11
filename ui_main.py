@@ -4,6 +4,7 @@
 # Generic shell (UI) that hosts pluggable modules (tabs/panels).
 
 import sys
+from pathlib import Path
 from PySide6 import QtCore, QtGui, QtWidgets
 import vlc
 
@@ -11,6 +12,8 @@ from ui_cam_module import CameraModule
 from ui_prep_module import PrepModule
 from ui_img2ground_module import Img2GroundModule
 from ui_user_module import UserModule
+from project_io import export_project, load_project
+import shared_state
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -50,10 +53,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, self._dock_logs)
         self._dock_logs.show()
 
-        # Simple view menu to toggle docks
+        # Simple menus
         view_menu = self.menuBar().addMenu("View")
         view_menu.addAction(self.settings_dock.toggleViewAction())
         view_menu.addAction(self._dock_logs.toggleViewAction())
+        proj_menu = self.menuBar().addMenu("Project")
+        act_save = proj_menu.addAction("Save Project…")
+        act_open = proj_menu.addAction("Open Project…")
+        act_save.triggered.connect(self.save_project)
+        act_open.triggered.connect(self.open_project)
 
         # Status bar
         self.status = self.statusBar()
@@ -68,10 +76,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._modules = []
 
         cam = CameraModule(self.vlc_instance, log_func=self.log)
+        self.cam_module = cam
         self._modules.append(cam)
         self.settings_tabs.addTab(cam.widget(), cam.title)
 
         prep = PrepModule(self.vlc_instance, log_func=self.log)
+        self.prep_module = prep
         self._modules.append(prep)
         self.settings_tabs.addTab(prep.widget(), prep.title)
 
@@ -82,6 +92,37 @@ class MainWindow(QtWidgets.QMainWindow):
         user = UserModule(self.vlc_instance, log_func=self.log)
         self._modules.append(user)
         self.tabs.insertTab(0, user.widget(), user.title)
+
+    def save_project(self):
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Project", "", "RTG Project (*.rtgproj)")
+        if not path:
+            return
+        profile = self.cam_module.get_profile()
+        bundle_name = self.prep_module.current_bundle_name()
+        dtm_path = shared_state.dtm_path or self.prep_module.get_dtm_path()
+        ortho_path = shared_state.orthophoto_path or ""
+        try:
+            export_project(Path(path), profile, bundle_name, dtm_path, ortho_path)
+            self.log(f"Project saved -> {path}")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Save Project", f"Failed: {e}")
+
+    def open_project(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open Project", "", "RTG Project (*.rtgproj)")
+        if not path:
+            return
+        try:
+            data = load_project(Path(path))
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Open Project", f"Failed: {e}")
+            return
+        self.cam_module.apply_profile(data.get("camera", {}))
+        bundle = data.get("bundle")
+        if bundle:
+            self.prep_module.apply_bundle(bundle)
+        layers = data.get("layers", {})
+        self.prep_module.apply_project_layers(layers.get("dtm"), layers.get("ortho"))
+        self.log(f"Project loaded -> {path}")
 
     # ------- global logging -------
     @QtCore.Slot(str)

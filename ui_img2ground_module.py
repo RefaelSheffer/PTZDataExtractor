@@ -9,9 +9,9 @@ viewing direction and field of view used during calibration.
 """
 
 from __future__ import annotations
-import sys, math
+import sys, math, json
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any, Tuple, List, Protocol
 
 import numpy as np
 from PySide6 import QtCore, QtWidgets, QtGui
@@ -28,6 +28,33 @@ import shared_state
 from app_state import app_state
 
 from onvif_ptz import OnvifPTZClient, PTZReading
+from ptz_cgi import PtzCgiThread
+
+APP_DIR = Path(__file__).resolve().parent
+APP_CFG = APP_DIR / "app_config.json"
+
+
+def load_cfg() -> dict:
+    if APP_CFG.exists():
+        try:
+            return json.loads(APP_CFG.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def save_cfg(cfg: dict) -> None:
+    try:
+        APP_CFG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+class PTZClient(Protocol):
+    poll_dt: float
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+    def last(self) -> PTZReading: ...
 
 
 # ---------------- math helpers ----------------
@@ -351,6 +378,7 @@ class Img2GroundModule(QtCore.QObject):
         super().__init__()
         self._log = log_func
         self._vlc = vlc_instance
+        self._cfg = load_cfg()
 
         # video
         self.video = VlcVideoWidget(self._vlc)
@@ -370,7 +398,7 @@ class Img2GroundModule(QtCore.QObject):
         self._frame_item: Optional[QtWidgets.QGraphicsPathItem] = None
 
         # PTZ
-        self._ptz: Optional[OnvifPTZClient] = None
+        self._ptz: Optional[PTZClient] = None
         self._ptz_last: PTZReading = PTZReading()
         self._yaw_offset_deg: Optional[float] = None
         self._hfov_deg: Optional[float] = None
@@ -486,6 +514,10 @@ class Img2GroundModule(QtCore.QObject):
         self.ed_host = QtWidgets.QLineEdit("192.168.1.108")
         self.ed_port = QtWidgets.QSpinBox(); self.ed_port.setRange(1,65535); self.ed_port.setValue(80)
         self.ed_user = QtWidgets.QLineEdit(""); self.ed_pwd = QtWidgets.QLineEdit(""); self.ed_pwd.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.ptz_cgi_port = QtWidgets.QSpinBox(); self.ptz_cgi_port.setRange(1, 65535); self.ptz_cgi_port.setValue(int(self._cfg.get("ptz_cgi_port", 80)))
+        self.ptz_cgi_channel = QtWidgets.QSpinBox(); self.ptz_cgi_channel.setRange(1, 16); self.ptz_cgi_channel.setValue(int(self._cfg.get("ptz_cgi_channel", 1)))
+        self.ptz_cgi_poll = QtWidgets.QDoubleSpinBox(); self.ptz_cgi_poll.setRange(0.1, 30.0); self.ptz_cgi_poll.setSingleStep(0.5); self.ptz_cgi_poll.setValue(float(self._cfg.get("ptz_cgi_poll_hz", 5.0)))
+        self.ptz_cgi_https = QtWidgets.QCheckBox("HTTPS"); self.ptz_cgi_https.setChecked(bool(self._cfg.get("ptz_cgi_https", False)))
         self.btn_ptz_connect = QtWidgets.QPushButton("Connect PTZ"); self.btn_ptz_connect.clicked.connect(self._connect_ptz)
         self.btn_ptz_from_cam = QtWidgets.QPushButton("Use from Cameras tab"); self.btn_ptz_from_cam.clicked.connect(self._ptz_load_from_shared)
         self.lbl_ptz = QtWidgets.QLabel("Pan=?, Tilt=?, Zoom=?, F(mm)=?")
@@ -496,8 +528,16 @@ class Img2GroundModule(QtCore.QObject):
         gl.addWidget(QtWidgets.QLabel("User:"), 1,0); gl.addWidget(self.ed_user,1,1)
         gl.addWidget(QtWidgets.QLabel("Pass:"), 1,2); gl.addWidget(self.ed_pwd,1,3)
         gl.addWidget(self.btn_ptz_connect, 1,4)
-        gl.addWidget(self.lbl_ptz, 2,0,1,5)
-        gl.addWidget(self.btn_fov_cal, 3,0,1,5)
+        gl.addWidget(QtWidgets.QLabel("CGI port:"), 2,0); gl.addWidget(self.ptz_cgi_port,2,1)
+        gl.addWidget(QtWidgets.QLabel("Chan:"), 2,2); gl.addWidget(self.ptz_cgi_channel,2,3)
+        gl.addWidget(self.ptz_cgi_https,2,4)
+        gl.addWidget(QtWidgets.QLabel("CGI Hz:"),3,0); gl.addWidget(self.ptz_cgi_poll,3,1)
+        gl.addWidget(self.lbl_ptz,4,0,1,5)
+        gl.addWidget(self.btn_fov_cal,5,0,1,5)
+        self.ptz_cgi_port.valueChanged.connect(lambda _: self._save_app_cfg())
+        self.ptz_cgi_channel.valueChanged.connect(lambda _: self._save_app_cfg())
+        self.ptz_cgi_poll.valueChanged.connect(lambda _: self._save_app_cfg())
+        self.ptz_cgi_https.stateChanged.connect(lambda _: self._save_app_cfg())
         g.addWidget(grp, r, 0, 1, 8); r += 1
 
         # mapping mode + pick
@@ -524,6 +564,15 @@ class Img2GroundModule(QtCore.QObject):
         self._update_mode_enabled()
         self._update_lock_cam()
         return w
+
+    def _save_app_cfg(self) -> None:
+        self._cfg.update({
+            "ptz_cgi_port": self.ptz_cgi_port.value(),
+            "ptz_cgi_channel": self.ptz_cgi_channel.value(),
+            "ptz_cgi_poll_hz": self.ptz_cgi_poll.value(),
+            "ptz_cgi_https": self.ptz_cgi_https.isChecked(),
+        })
+        save_cfg(self._cfg)
 
     # ----- VLC -----
     def _attach_vlc_events(self):
@@ -680,17 +729,39 @@ class Img2GroundModule(QtCore.QObject):
 
     # ----- PTZ -----
     def _connect_ptz(self):
-        host = self.ed_host.text().strip(); port = int(self.ed_port.value())
-        user = self.ed_user.text().strip(); pwd = self.ed_pwd.text().strip()
+        host = self.ed_host.text().strip()
+        user = self.ed_user.text().strip()
+        pwd = self.ed_pwd.text().strip()
+        onvif_port = int(self.ed_port.value())
+
         try:
-            if self._ptz: self._ptz.stop()
-        except Exception: pass
+            if self._ptz:
+                self._ptz.stop()
+        except Exception:
+            pass
+        self._ptz = None
+
         try:
-            self._ptz = OnvifPTZClient(host, port, user, pwd, poll_hz=5.0)
+            self._ptz = OnvifPTZClient(host, onvif_port, user, pwd, poll_hz=5.0)
             self._ptz.start()
-            self._log("PTZ: connected / polling")
-        except Exception as e:
-            QtWidgets.QMessageBox.warning(None, "PTZ", f"Failed to connect: {e}")
+            self._log("PTZ: ONVIF connected")
+        except Exception as e_onvif:
+            try:
+                cgi_port = int(self.ptz_cgi_port.value())
+                cgi_chan = int(self.ptz_cgi_channel.value())
+                cgi_hz = float(self.ptz_cgi_poll.value())
+                cgi_https = self.ptz_cgi_https.isChecked()
+                self._ptz = PtzCgiThread(host, cgi_port, user, pwd,
+                                         channel=cgi_chan, poll_hz=cgi_hz, https=cgi_https)
+                self._ptz.start()
+                self._log(f"PTZ: CGI connected ({'https' if cgi_https else 'http'})")
+            except Exception as e_cgi:
+                QtWidgets.QMessageBox.warning(
+                    None,
+                    "PTZ",
+                    f"Failed ONVIF ({e_onvif}); CGI fallback failed ({e_cgi}).",
+                )
+                self._ptz = None
 
     def _poll_ptz_ui(self):
         if not self._ptz: return

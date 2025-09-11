@@ -26,6 +26,7 @@ class _Status:
     pan_deg: Optional[float] = None
     tilt_deg: Optional[float] = None
     zoom_norm: Optional[float] = None
+    focus_pos: Optional[float] = None
 
 
 class PtzCgiThread:
@@ -135,7 +136,8 @@ class PtzCgiThread:
         tilt = self._to_float(data.get("tilt"))
         zoom_raw = self._to_float(data.get("zoom"))
         zoom = self._normalize_zoom(zoom_raw)
-        return _Status(pan_deg=pan, tilt_deg=tilt, zoom_norm=zoom)
+        focus = self._to_float(data.get("focus"))
+        return _Status(pan_deg=pan, tilt_deg=tilt, zoom_norm=zoom, focus_pos=focus)
 
     def _to_float(self, v) -> Optional[float]:
         try:
@@ -148,7 +150,7 @@ class PtzCgiThread:
             try:
                 self._csv_file = open(self._csv_path, "w", newline="", encoding="utf-8")
                 self._csv_writer = csv.writer(self._csv_file)
-                self._csv_writer.writerow(["ts", "pan_deg", "tilt_deg", "zoom_norm"])
+                self._csv_writer.writerow(["ts", "pan_deg", "tilt_deg", "zoom_norm", "focus_pos"])
             except Exception:
                 self._csv_file = None
                 self._csv_writer = None
@@ -160,6 +162,23 @@ class PtzCgiThread:
                 self._last.pan_deg = st.pan_deg
                 self._last.tilt_deg = st.tilt_deg
                 self._last.zoom_norm = st.zoom_norm
+                self._last.focus_pos = st.focus_pos
+                try:
+                    import shared_state
+                    shared_state.ptz_meta = {
+                        "ts": time.time(),
+                        "pan_deg": st.pan_deg,
+                        "tilt_deg": st.tilt_deg,
+                        "zoom_mm": None,
+                        "zoom_norm": st.zoom_norm,
+                        "pan_dps": None,
+                        "tilt_dps": None,
+                        "zoom_speed": None,
+                        "hfov_deg": None,
+                        "focus_pos": st.focus_pos,
+                    }
+                except Exception:
+                    pass
                 if self._csv_writer:
                     try:
                         self._csv_writer.writerow([
@@ -167,6 +186,7 @@ class PtzCgiThread:
                             st.pan_deg,
                             st.tilt_deg,
                             st.zoom_norm,
+                            st.focus_pos,
                         ])
                         self._csv_file.flush()
                     except Exception:

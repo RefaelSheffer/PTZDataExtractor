@@ -19,11 +19,21 @@ onvif_cfg: Optional[Dict] = None
 ptz_meta: Optional[Dict] = None
 
 
-class _Signals(QtCore.QObject):
+class SharedState(QtCore.QObject):
+    """Container for cross-module signals and per-camera layer metadata."""
+
     signal_stream_mode_changed = QtCore.Signal(str)
     signal_camera_changed = QtCore.Signal(object)
+    signal_layers_changed = QtCore.Signal(str, dict)  # (alias, layers)
+
+    def __init__(self) -> None:
+        super().__init__()
+        # {"alias": {"ortho": str|None, "dtm": str|None, "srs": str|None}}
+        self.layers_for_camera: Dict[str, Dict] = {}
 
 
-signals = _Signals()
-signal_stream_mode_changed = signals.signal_stream_mode_changed
-signal_camera_changed = signals.signal_camera_changed
+_state = SharedState()
+signal_stream_mode_changed = _state.signal_stream_mode_changed
+signal_camera_changed = _state.signal_camera_changed
+signal_layers_changed = _state.signal_layers_changed
+layers_for_camera = _state.layers_for_camera

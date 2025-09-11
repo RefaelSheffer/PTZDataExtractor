@@ -1107,27 +1107,32 @@ class CameraModule(QtCore.QObject):
             except Exception:
                 pass
             self._ptz_cgi = None
+
+        csv_path = str(Path.cwd() / 'ptz_log.csv')
+        onvif_port = int(self.onvif_port.value())
         try:
-            csv_path = str(Path.cwd() / 'ptz_log.csv')
-            onvif_port = int(self.onvif_port.value())
             self._ptz_meta = PtzMetaThread(host, onvif_port, user, pwd, poll_hz=5.0,
                                           csv_path=csv_path)
             self._ptz_meta.start()
             self._log(f"PTZ telemetry logging -> {csv_path}")
-        except Exception as e:
-            self._log(f"Failed to start PTZ telemetry: {e}")
+            return
+        except Exception as e_onvif:
+            self._log(f"ONVIF telemetry failed: {e_onvif}")
+
         try:
-            csv_path2 = str(Path.cwd() / 'ptz_cgi_log.csv')
             port = int(self.ptz_cgi_port.value())
             chan = int(self.ptz_cgi_channel.value())
             hz = float(self.ptz_cgi_poll.value())
             https = self.ptz_cgi_https.isChecked()
             self._ptz_cgi = PtzCgiThread(host, port, user, pwd, channel=chan,
-                                         poll_hz=hz, https=https, csv_path=csv_path2)
-            self._ptz_cgi.start()
-            self._log(f"PTZ CGI logging -> {csv_path2}")
-        except Exception as e:
-            self._log(f"Failed to start PTZ CGI telemetry: {e}")
+                                         poll_hz=hz, https=https)
+            self._ptz_meta = PtzMetaThread(client=self._ptz_cgi,
+                                          sensor_width_mm=6.4,
+                                          csv_path=csv_path)
+            self._ptz_meta.start()
+            self._log(f"PTZ CGI telemetry logging -> {csv_path}")
+        except Exception as e_cgi:
+            self._log(f"Failed to start PTZ telemetry: ONVIF ({e_onvif}); CGI fallback failed ({e_cgi})")
 
     def _update_live_context(self, url: str, host: str, tcp: bool, codec: str,
                               width: Optional[int], height: Optional[int],

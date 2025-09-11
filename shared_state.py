@@ -21,7 +21,9 @@ ptz_meta: Optional[Dict] = None
 
 class _Signals(QtCore.QObject):
     signal_stream_mode_changed = QtCore.Signal(str)
+    signal_camera_changed = QtCore.Signal(object)
 
 
 signals = _Signals()
 signal_stream_mode_changed = signals.signal_stream_mode_changed
+signal_camera_changed = signals.signal_camera_changed

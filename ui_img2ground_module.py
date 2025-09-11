@@ -16,6 +16,7 @@ from typing import Optional, Dict, Any, Tuple, List
 import numpy as np
 from PySide6 import QtCore, QtWidgets, QtGui
 import vlc
+from dataclasses import replace
 
 from camera_models import load_bundle, list_bundles
 from geom3d import camera_ray_in_world, GeoRef
@@ -370,6 +371,7 @@ class Img2GroundModule(QtCore.QObject):
         # PTZ
         self._ptz: Optional[OnvifPTZClient] = None
         self._ptz_last: PTZReading = PTZReading()
+        self._ptz_snapshot: Optional[PTZReading] = None
         self._yaw_offset_deg: Optional[float] = None
         self._hfov_deg: Optional[float] = None
         self._fx_from_hfov: Optional[float] = None
@@ -827,22 +829,27 @@ class Img2GroundModule(QtCore.QObject):
     def _pick_now_snapshot(self):
         try: self._player.set_pause(True)
         except Exception: pass
+        # capture PTZ angles at this moment
+        self._ptz_snapshot = replace(self._ptz_last)
         pm = self.video.grab()
         if pm.isNull():
             QtWidgets.QMessageBox.information(None, "Pick", "Failed to capture frame.")
             try: self._player.set_pause(False)
             except Exception: pass
+            self._ptz_snapshot = None
             return
         img = pm.toImage()
         dlg = SinglePickDialog(img, self._root)
         if dlg.exec() == QtWidgets.QDialog.Accepted and dlg.picked_uv() is not None:
             uu, vv = dlg.picked_uv()
-            self._map_from_click(uu, vv, uv_in_calib_space=True)
+            self._map_from_click(uu, vv, uv_in_calib_space=True, ptz_reading=self._ptz_snapshot)
+        self._ptz_snapshot = None
         try: self._player.set_pause(False)
         except Exception: pass
 
     # ----- core mapping switch -----
-    def _map_from_click(self, u: int, v: int, uv_in_calib_space: bool = False):
+    def _map_from_click(self, u: int, v: int, uv_in_calib_space: bool = False,
+                        ptz_reading: Optional[PTZReading] = None):
         mode = self.cmb_mapping.currentText()
         prefer_h = (mode.startswith("Auto") or mode.startswith("Homography"))
         allow_ptz = (mode.startswith("Auto") or mode.startswith("PTZ"))
@@ -856,7 +863,7 @@ class Img2GroundModule(QtCore.QObject):
                 return
 
         if allow_ptz:
-            ok = self._map_by_ptz(u, v)
+            ok = self._map_by_ptz(u, v, ptz_reading)
             if ok:
                 return
 
@@ -882,7 +889,7 @@ class Img2GroundModule(QtCore.QObject):
             return (None, None)
         return (xs, ys)
 
-    def _map_by_ptz(self, u: int, v: int) -> bool:
+    def _map_by_ptz(self, u: int, v: int, ptz_reading: Optional[PTZReading]) -> bool:
         if not (self._bundle and self._dtm and self._ortho_layer and self._yaw_offset_deg is not None):
             return False
         intr_d = self._bundle["intrinsics"]
@@ -893,7 +900,8 @@ class Img2GroundModule(QtCore.QObject):
         else:
             fx = intr_d["fx"]; fy = intr_d["fy"]; cx = intr_d["cx"]; cy = intr_d["cy"]
         pose_d = self._bundle["pose"]
-        yaw = (self._ptz_last.pan_deg or 0.0) + (self._yaw_offset_deg or 0.0)
+        r = ptz_reading or self._ptz_last
+        yaw = (r.pan_deg or 0.0) + (self._yaw_offset_deg or 0.0)
         pitch = pose_d.get("pitch_deg", pose_d.get("pitch", 0.0))
         roll  = pose_d.get("roll_deg",  pose_d.get("roll", 0.0))
         from geom3d import CameraIntrinsics, CameraPose, intersect_ray_with_dtm

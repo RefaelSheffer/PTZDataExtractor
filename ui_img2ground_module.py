@@ -20,7 +20,8 @@ import vlc
 from camera_models import load_bundle, list_bundles
 from geom3d import camera_ray_in_world, GeoRef
 from dtm import DTM
-from ui_map_tools import MapView, numpy_to_qimage
+from map_view import MapView
+from ui_map_tools import numpy_to_qimage
 from raster_layer import RasterLayer
 from ui_common import VlcVideoWidget
 from ui_calibration_module import HorizonAzimuthCalibrationDialog
@@ -496,11 +497,15 @@ class Img2GroundModule(QtCore.QObject):
         self.btn_az_from_ortho = QtWidgets.QPushButton("Azimuth from ortho…")
         self.btn_az_from_ortho.setToolTip("בחר נקודה/ות באורתו שהמצלמה מביטה אליהן. ההיסט אזימוט יחושב מול ה-pan החי.")
         self.btn_az_from_ortho.clicked.connect(self._calibrate_azimuth_from_ortho)
-        self.btn_az_from_ortho.setEnabled(self._get_pan_now() is not None)
         gls.addWidget(self.btn_level_horizon); gls.addWidget(self.btn_az_from_ortho)
         g.addWidget(grp_simple, r, 0, 1, 8); r += 1
 
         # camera model / calibration
+        # keep Az button disabled until we have both ortho & pan
+        self.btn_az_from_ortho.setEnabled(False)
+        # update enablement whenever prerequisites change
+        QtCore.QTimer.singleShot(500, self._refresh_az_btn_state)
+        self._map.sceneChanged.connect(lambda: QtCore.QTimer.singleShot(0, self._refresh_az_btn_state) if hasattr(self._map, "scene") else None)
         self.chk_use_active = QtWidgets.QCheckBox("Use active camera (from RTSP tab)")
         self.chk_use_active.toggled.connect(self.use_active_camera)
         self.btn_refresh_cam = QtWidgets.QPushButton("\uD83D\uDD04 Refresh from live")
@@ -698,7 +703,7 @@ class Img2GroundModule(QtCore.QObject):
             except Exception as e:
                 self._log(f"Auto PTZ connect failed: {e}")
 
-        self.btn_az_from_ortho.setEnabled(self._get_pan_now() is not None)
+        self._refresh_az_btn_state()
 
     def _on_stream_mode_changed(self, mode: str) -> None:
         ctx = app_state.current_camera
@@ -880,35 +885,32 @@ class Img2GroundModule(QtCore.QObject):
             # אל תקרוס בגלל None – תציג placeholder
             self.lbl_ptz.setText("Pan=?, Tilt=?, Zoom=?, F(mm)=?")
 
-        self.btn_az_from_ortho.setEnabled(self._get_pan_now() is not None)
+        self._refresh_az_btn_state()
 
+    # ----- FOV calib via PTZ -----
     def _get_pan_now(self):
-        # 1) local
-        if getattr(self, "_ptz_last", None) and self._ptz_last.pan_deg is not None:
+        # 1) מקומי
+        if getattr(self, "_ptz_last", None) and getattr(self._ptz_last, "pan_deg", None) is not None:
             return float(self._ptz_last.pan_deg)
-        # 2) global (meta from Cameras tab)
+        # 2) גלובלי רץ מהטאב Cameras
         meta = getattr(app_state, "ptz_meta", None)
-        if meta is None:
-            meta = getattr(shared_state, "ptz_meta", None)
         try:
-            if hasattr(meta, "last"):
-                last = meta.last()
-            elif isinstance(meta, dict):
-                last = meta
-            else:
-                last = None
-            pan = getattr(last, "pan_deg", None) if last else None
-            if pan is not None:
-                return float(pan)
+            last = meta.last() if meta else None
+            if last and last.pan_deg is not None:
+                return float(last.pan_deg)
         except Exception:
             pass
-        # 3) active context (if stored)
+        # 3) מה-context (אם נשמר שם)
         ctx = getattr(app_state, "current_camera", None)
         if ctx and getattr(ctx, "pan_deg", None) is not None:
             return float(ctx.pan_deg)
         return None
 
-    # ----- FOV calib via PTZ -----
+    def _refresh_az_btn_state(self):
+        has_ortho = self._ortho_layer is not None
+        has_pan = self._get_pan_now() is not None
+        self.btn_az_from_ortho.setEnabled(bool(has_ortho and has_pan))
+
     def _calibrate_fov_with_ptz(self):
         """Calibrate yaw offset and FOV using PTZ telemetry.
 
@@ -1030,29 +1032,29 @@ class Img2GroundModule(QtCore.QObject):
         cam_proj = getattr(shared_state, "camera_proj", None)
         if not cam_proj:
             QtWidgets.QMessageBox.information(None, "Azimuth from ortho", "Camera position not set in Preparation."); return
-        dlg = PointsDialog(self._map, self._root)
-        if dlg.exec() != QtWidgets.QDialog.Accepted:
+        # Inline pick: קליק בודד על המפה
+        self._toast("Click a point on the ortho…")
+        self._map.enable_single_click(lambda xs, ys: self._on_azimuth_pick_scene(xs, ys, float(pan_now)))
+        return
+
+    def _on_azimuth_pick_scene(self, xs: float, ys: float, pan_now: float):
+        if not self._ortho_layer:
             return
-        pts = dlg.result_points()
-        if not pts:
-            return
-        Xc, Yc = float(cam_proj["x"]), float(cam_proj["y"])
-        yaws = []
+        Xc = float(getattr(shared_state, "camera_proj", {}).get("x", 0.0))
+        Yc = float(getattr(shared_state, "camera_proj", {}).get("y", 0.0))
         try:
-            for xs, ys in pts:
-                X, Y = self._ortho_layer.scene_to_geo(xs, ys)
-                dx = X - Xc; dy = Y - Yc
-                yaws.append(_normalize_angle_deg(math.degrees(math.atan2(dx, dy))))
+            X, Y = self._ortho_layer.scene_to_geo(xs, ys)
+            dx = X - Xc; dy = Y - Yc
+            az = _normalize_angle_deg(math.degrees(math.atan2(dx, dy)))
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Azimuth from ortho", f"scene_to_geo failed: {e}"); return
-        s = sum(math.sin(math.radians(a)) for a in yaws)
-        c = sum(math.cos(math.radians(a)) for a in yaws)
-        yaw_avg = math.degrees(math.atan2(s, c))
+        self._map.disable_single_click()
+        yaw_avg = az
         self._yaw_offset_deg = _normalize_angle_deg(yaw_avg - pan_now)
         ctx = getattr(app_state, "current_camera", None)
         if ctx is not None:
             setattr(ctx, "yaw_offset_deg", getattr(ctx, "yaw_offset_deg", 0.0) + self._yaw_offset_deg)
-        self.lbl_status.setText(f"Azimuth offset={self._yaw_offset_deg:.2f}° (avg yaw {yaw_avg:.2f}°)")
+        self.lbl_status.setText(f"Azimuth offset={self._yaw_offset_deg:.2f}° (bearing {yaw_avg:.2f}°)")
         QtWidgets.QMessageBox.information(None, "Azimuth from ortho",
             f"Bearing to point: {yaw_avg:.2f}°\nPan now: {pan_now:.2f}°\nApplied yaw offset: {self._yaw_offset_deg:.2f}°")
         pose_d = self._bundle.get("pose") if self._bundle else None
@@ -1062,6 +1064,7 @@ class Img2GroundModule(QtCore.QObject):
             yaw_rad = math.radians(yaw_avg)
             d = np.array([math.sin(yaw_rad), math.cos(yaw_rad), 0.0])
             self._draw_azimuth_line(o, d, georef)
+        self._refresh_az_btn_state()
 
     # ----- FOV wedge drawing -----
     def _remove_fov_wedge(self):

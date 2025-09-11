@@ -607,11 +607,15 @@ class CameraModule(QtCore.QObject):
         QtWidgets.QMessageBox.information(self._root, "Quick check", "\n".join(txt))
 
     def _open_external_vlc(self):
-        url = self._compose_rtsp_url_with_auth()
+        url = self._compose_rtsp_url()  # no credentials in URL
         exe = default_vlc_path()
         cmd = [exe]
         if self._last_conn_force_tcp:
             cmd.append("--rtsp-tcp")
+        user = self.user.text().strip()
+        pwd  = self.pwd.text().strip()
+        if user:
+            cmd.extend([f"--rtsp-user={user}", f"--rtsp-pwd={pwd}"])
         cmd.append(url)
         try:
             subprocess.Popen(
@@ -635,15 +639,14 @@ class CameraModule(QtCore.QObject):
             opts.append(':rtsp-tcp')
         opts += [':avcodec-hw=none', ':network-caching=800', ':no-video-title-show']
 
-        final_url = url
-        if user and "@" not in url and "://" in url:
-            sch, rest = url.split('://',1)
-            final_url = f"{sch}://{user}:{pwd}@{rest}"
-
-        media = self.vlc_instance.media_new(final_url, *opts)
+        media = self.vlc_instance.media_new(url, *opts)
+        if user:
+            media.add_option(f":rtsp-user={user}")
+        if pwd:
+            media.add_option(f":rtsp-pwd={pwd}")
         self.video.player().set_media(media)
         self.video.player().play()
-        self._log("Player started: " + final_url)
+        self._log("Player started: " + url)
 
         # remember params for auto-retry
         self._retry_url = url

@@ -75,23 +75,30 @@ class MainWindow(QtWidgets.QMainWindow):
         # Register modules
         self._modules = []
 
+        def _scroll(w: QtWidgets.QWidget) -> QtWidgets.QScrollArea:
+            sc = QtWidgets.QScrollArea()
+            sc.setWidget(w)
+            sc.setWidgetResizable(True)
+            sc.setFrameShape(QtWidgets.QFrame.NoFrame)
+            return sc
+
         cam = CameraModule(self.vlc_instance, log_func=self.log)
         self.cam_module = cam
         self._modules.append(cam)
-        self.settings_tabs.addTab(cam.widget(), cam.title)
+        self.settings_tabs.addTab(_scroll(cam.widget()), cam.title)
 
         prep = PrepModule(self.vlc_instance, log_func=self.log)
         self.prep_module = prep
         self._modules.append(prep)
-        self.settings_tabs.addTab(prep.widget(), prep.title)
+        self.settings_tabs.addTab(_scroll(prep.widget()), prep.title)
 
         i2g = Img2GroundModule(self.vlc_instance, log_func=self.log)
         self._modules.append(i2g)
-        self.settings_tabs.addTab(i2g.widget(), i2g.title)
+        self.settings_tabs.addTab(_scroll(i2g.widget()), i2g.title)
 
         user = UserModule(self.vlc_instance, log_func=self.log)
         self._modules.append(user)
-        self.tabs.insertTab(0, user.widget(), user.title)
+        self.tabs.insertTab(0, _scroll(user.widget()), user.title)
 
     def save_project(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Project", "", "RTG Project (*.rtgproj)")

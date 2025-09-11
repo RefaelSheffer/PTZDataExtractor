@@ -36,7 +36,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings_tabs = QtWidgets.QTabWidget()
         self.settings_tabs.setDocumentMode(True)
         self.settings_tabs.setMovable(True)
-        self.tabs.addTab(self.settings_tabs, "Settings")
+        self.settings_dock = QtWidgets.QDockWidget("Settings", self)
+        self.settings_dock.setWidget(self.settings_tabs)
+        self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, self.settings_dock)
 
         # Global log dock (persist + min height)
         self.log_view = QtWidgets.QPlainTextEdit()
@@ -47,6 +49,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._dock_logs.setMinimumHeight(180)
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, self._dock_logs)
         self._dock_logs.show()
+
+        # Simple view menu to toggle docks
+        view_menu = self.menuBar().addMenu("View")
+        view_menu.addAction(self.settings_dock.toggleViewAction())
+        view_menu.addAction(self._dock_logs.toggleViewAction())
 
         # Status bar
         self.status = self.statusBar()

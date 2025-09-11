@@ -447,8 +447,22 @@ class MainWindow(QtWidgets.QMainWindow):
         exec_g = QtWidgets.QGroupBox("Executables & Tunables")
         eg = QtWidgets.QGridLayout(exec_g)
 
-        self.ffmpeg_path = QtWidgets.QLineEdit(self.cfg.get("ffmpeg_path", which("ffmpeg") or r"C:\ffmpeg\bin\ffmpeg.exe"))
-        self.ffprobe_path = QtWidgets.QLineEdit(self.cfg.get("ffprobe_path", which("ffprobe") or r"C:\ffmpeg\bin\ffprobe.exe"))
+        ffmpeg_path = self.cfg.get("ffmpeg_path") or which("ffmpeg")
+        if not ffmpeg_path:
+            QtWidgets.QMessageBox.warning(
+                self, "FFmpeg not found", "ffmpeg executable was not located; please set its path."
+            )
+        self.ffmpeg_path = QtWidgets.QLineEdit(
+            ffmpeg_path or r"C:\ffmpeg\bin\ffmpeg.exe"
+        )
+        ffprobe_path = self.cfg.get("ffprobe_path") or which("ffprobe")
+        if not ffprobe_path:
+            QtWidgets.QMessageBox.warning(
+                self, "FFprobe not found", "ffprobe executable was not located; please set its path."
+            )
+        self.ffprobe_path = QtWidgets.QLineEdit(
+            ffprobe_path or r"C:\ffmpeg\bin\ffprobe.exe"
+        )
         btn_ffmpeg = QtWidgets.QPushButton("Browse…"); btn_ffmpeg.clicked.connect(lambda: self._browse_exe(self.ffmpeg_path, "Select ffmpeg"))
         btn_ffprobe = QtWidgets.QPushButton("Browse…"); btn_ffprobe.clicked.connect(lambda: self._browse_exe(self.ffprobe_path, "Select ffprobe"))
 

@@ -145,11 +145,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mediamtx_path = QtWidgets.QLineEdit(
             self._cfg.get("mediamtx_path", str(Path.cwd() / "mediamtx.exe"))
         )
+        ffmpeg_path = self._cfg.get("ffmpeg_path") or which("ffmpeg")
+        if not ffmpeg_path:
+            QtWidgets.QMessageBox.warning(
+                self, "FFmpeg not found", "ffmpeg executable was not located; please set its path."
+            )
         self.ffmpeg_path = QtWidgets.QLineEdit(
-            self._cfg.get("ffmpeg_path", which("ffmpeg") or r"C:\\ffmpeg\\bin\\ffmpeg.exe")
+            ffmpeg_path or r"C:\\ffmpeg\\bin\\ffmpeg.exe"
         )
+
+        ffprobe_path = self._cfg.get("ffprobe_path") or which("ffprobe")
+        if not ffprobe_path:
+            QtWidgets.QMessageBox.warning(
+                self, "FFprobe not found", "ffprobe executable was not located; please set its path."
+            )
         self.ffprobe_path = QtWidgets.QLineEdit(
-            self._cfg.get("ffprobe_path", which("ffprobe") or r"C:\\ffmpeg\\bin\\ffprobe.exe")
+            ffprobe_path or r"C:\\ffmpeg\\bin\\ffprobe.exe"
         )
         self.mock_file  = QtWidgets.QLineEdit()
         btn_browse = QtWidgets.QPushButton("Browse MP4…"); btn_browse.clicked.connect(self._choose_mp4)

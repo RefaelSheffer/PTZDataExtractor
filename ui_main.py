@@ -7,7 +7,6 @@ import sys
 from PySide6 import QtCore, QtGui, QtWidgets
 import vlc
 
-from ui_settings_module import SettingsModule
 from ui_cam_module import CameraModule
 from ui_prep_module import PrepModule
 from ui_img2ground_module import Img2GroundModule
@@ -32,6 +31,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabs.setMovable(True)
         self.setCentralWidget(self.tabs)
 
+        # Base settings container with its own tabs
+        self.settings_tabs = QtWidgets.QTabWidget()
+        self.settings_tabs.setDocumentMode(True)
+        self.settings_tabs.setMovable(True)
+        self.tabs.addTab(self.settings_tabs, "Settings")
+
         # Global log dock (persist + min height)
         self.log_view = QtWidgets.QPlainTextEdit()
         self.log_view.setReadOnly(True)
@@ -54,21 +59,17 @@ class MainWindow(QtWidgets.QMainWindow):
         # Register modules
         self._modules = []
 
-        settings = SettingsModule(log_func=self.log)
-        self._modules.append(settings)
-        self.tabs.addTab(settings.widget(), settings.title)
-
         cam = CameraModule(self.vlc_instance, log_func=self.log)
         self._modules.append(cam)
-        self.tabs.addTab(cam.widget(), cam.title)
+        self.settings_tabs.addTab(cam.widget(), cam.title)
 
         prep = PrepModule(self.vlc_instance, log_func=self.log)
         self._modules.append(prep)
-        self.tabs.addTab(prep.widget(), prep.title)
+        self.settings_tabs.addTab(prep.widget(), prep.title)
 
         i2g = Img2GroundModule(self.vlc_instance, log_func=self.log)
         self._modules.append(i2g)
-        self.tabs.addTab(i2g.widget(), i2g.title)
+        self.settings_tabs.addTab(i2g.widget(), i2g.title)
 
     # ------- global logging -------
     @QtCore.Slot(str)

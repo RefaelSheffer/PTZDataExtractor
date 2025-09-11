@@ -24,6 +24,8 @@ from ptz_cgi import PtzCgiThread
 
 from ui_common import VlcVideoWidget, default_vlc_path, open_folder, redact
 import shared_state  # <<< לשיתוף הגדרות ה-PTZ עם מודולים אחרים
+from app_state import app_state, LiveCameraContext, load_calibration
+from event_bus import bus
 
 APP_DIR = Path(__file__).resolve().parent
 PROFILES_PATH = APP_DIR / "profiles.json"  # module-specific profiles
@@ -517,6 +519,16 @@ class CameraModule(QtCore.QObject):
                 ok, codec, msg = self._probe_codec(url, user, pwd, False)
                 if ok:
                     tcp = False
+            width = height = fps = None
+            m = re.search(r"(\d+)x(\d+)", msg)
+            if m:
+                width, height = int(m.group(1)), int(m.group(2))
+            m = re.search(r"(\d+(?:\.\d+)?)\s*fps", msg, re.IGNORECASE)
+            if m:
+                try:
+                    fps = float(m.group(1))
+                except Exception:
+                    fps = None
             self._last_codec = codec
             if self.prefer_h264 and codec in ("hevc", "h265"):
                 alt_path = self._guess_h264_alt_rtsp(self.rtsp_path.text().strip())
@@ -531,11 +543,21 @@ class CameraModule(QtCore.QObject):
                         self.rtsp_path.setText(alt_path)
                         url = alt_url
                         codec = codec2
+                        m = re.search(r"(\d+)x(\d+)", msg2)
+                        if m:
+                            width, height = int(m.group(1)), int(m.group(2))
+                        m = re.search(r"(\d+(?:\.\d+)?)\s*fps", msg2, re.IGNORECASE)
+                        if m:
+                            try:
+                                fps = float(m.group(1))
+                            except Exception:
+                                fps = None
             self._hevc_guard_tried = False
             self._start_player(url, force_tcp=tcp, user=user, pwd=pwd)
             # פרסום הגדרות PTZ
             self._publish_ptz_cfg()
             self._start_ptz_meta(h, user, pwd)
+            self._update_live_context(url, h, tcp, codec, width, height, fps, user, pwd)
             return
 
         # ONVIF → RTSP
@@ -552,6 +574,16 @@ class CameraModule(QtCore.QObject):
             ok, codec, msg = self._probe_codec(url, user, pwd, False)
             if ok:
                 tcp = False
+        width = height = fps = None
+        m = re.search(r"(\d+)x(\d+)", msg)
+        if m:
+            width, height = int(m.group(1)), int(m.group(2))
+        m = re.search(r"(\d+(?:\.\d+)?)\s*fps", msg, re.IGNORECASE)
+        if m:
+            try:
+                fps = float(m.group(1))
+            except Exception:
+                fps = None
         self._last_codec = codec
         if self.prefer_h264 and codec in ("hevc", "h265"):
             alt = self._guess_h264_alt_onvif(h, int(self.onvif_port.value()), user, pwd)
@@ -564,11 +596,21 @@ class CameraModule(QtCore.QObject):
                 if ok2 and codec2 == "h264":
                     url = alt
                     codec = codec2
+                    m = re.search(r"(\d+)x(\d+)", msg2)
+                    if m:
+                        width, height = int(m.group(1)), int(m.group(2))
+                    m = re.search(r"(\d+(?:\.\d+)?)\s*fps", msg2, re.IGNORECASE)
+                    if m:
+                        try:
+                            fps = float(m.group(1))
+                        except Exception:
+                            fps = None
         self._hevc_guard_tried = False
         self._start_player(url, force_tcp=tcp, user=user, pwd=pwd)
         # פרסום הגדרות PTZ
         self._publish_ptz_cfg()
         self._start_ptz_meta(h, user, pwd)
+        self._update_live_context(url, h, tcp, codec, width, height, fps, user, pwd)
 
     # ===== Quick tools =====
     def _quick_check(self):
@@ -1086,3 +1128,41 @@ class CameraModule(QtCore.QObject):
             self._log(f"PTZ CGI logging -> {csv_path2}")
         except Exception as e:
             self._log(f"Failed to start PTZ CGI telemetry: {e}")
+
+    def _update_live_context(self, url: str, host: str, tcp: bool, codec: str,
+                              width: Optional[int], height: Optional[int],
+                              fps: Optional[float], user: str, pwd: str) -> None:
+        brand = model = serial = None
+        if ONVIFCamera is not None:
+            try:
+                cam = ONVIFCamera(host, int(self.onvif_port.value()), user, pwd)
+                dev = cam.create_device_service()
+                info = dev.GetDeviceInformation()
+                brand = getattr(info, 'Manufacturer', None)
+                model = getattr(info, 'Model', None)
+                serial = getattr(info, 'SerialNumber', None)
+            except Exception:
+                pass
+        intr, dist = load_calibration(serial, model, width, height)
+        ctx = LiveCameraContext(
+            online=True,
+            brand=brand,
+            host=host,
+            port=int(self.rtsp_port.value()),
+            rtsp_url=url,
+            user=user or None,
+            transport='tcp' if tcp else 'udp',
+            codec=codec,
+            width=width,
+            height=height,
+            fps=fps,
+            serial=serial,
+            model=model,
+            intrinsics=intr,
+            distortion=dist,
+        )
+        app_state.current_camera = ctx
+        try:
+            bus.signal_camera_changed.emit(ctx)
+        except Exception:
+            pass

@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""Align PTZ camera imagery with an orthophoto map.
+
+This module combines manual homography selection with live PTZ metadata to
+map image pixels to ground coordinates. Pan/tilt angles together with the
+zoom (focal length) and focus values reported by the camera determine the
+viewing direction and field of view used during calibration.
+"""
+
 from __future__ import annotations
 import sys, math
 from pathlib import Path
@@ -631,6 +639,14 @@ class Img2GroundModule(QtCore.QObject):
 
     # ----- FOV calib via PTZ -----
     def _calibrate_fov_with_ptz(self):
+        """Calibrate yaw offset and FOV using PTZ telemetry.
+
+        Uses the current pan angle reported by the camera and two
+        user-picked ground points to determine the viewing direction.
+        Zoom (focal length) and focus values from the PTZ feed are kept in
+        ``self._ptz_last`` for completeness, although they are not directly
+        used in this computation.
+        """
         if self._ortho_layer is None:
             QtWidgets.QMessageBox.information(None, "FOV", "Load an orthophoto first."); return
         if self._ptz_last.pan_deg is None:

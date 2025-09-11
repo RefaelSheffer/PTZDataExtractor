@@ -13,11 +13,13 @@ without touching the surrounding application.
 from __future__ import annotations
 
 from io import BytesIO
-from typing import Callable
+from typing import Callable, Optional, Tuple
 
 import vlc
 import qrcode
 from PySide6 import QtCore, QtWidgets, QtGui
+
+from ui_img2ground_module import SinglePickDialog
 
 from ui_common import VlcVideoWidget
 from ui_map_tools import MapView, numpy_to_qimage
@@ -34,7 +36,9 @@ class UserTab(QtWidgets.QWidget):
         self._vlc = vlc_instance
         self._log = log_func
         self._az_item = None
-        self._last_pick = None  # type: tuple | None
+        self._last_pick: Optional[Tuple[float, float]] = None
+        self._last_pick_item: QtWidgets.QGraphicsEllipseItem | None = None
+        self._last_pick_label: QtWidgets.QGraphicsSimpleTextItem | None = None
         self._ortho_layer: RasterLayer | None = None
         self._dtm_path: str | None = None
 
@@ -42,8 +46,11 @@ class UserTab(QtWidgets.QWidget):
         bar = QtWidgets.QToolBar()
         self.act_pick = bar.addAction("Pick now")
         self.act_az = bar.addAction("Toggle Azimuth")
-        self.act_qr = bar.addAction("QR for current view")
         self.act_copy = bar.addAction("Copy GMaps link")
+        self.act_qr = bar.addAction("Show QR")
+        self.cmb_mapping = QtWidgets.QComboBox()
+        self.cmb_mapping.addItems(["Auto (prefer Homography)", "Homography only", "PTZ+DTM only"])
+        bar.addWidget(self.cmb_mapping)
 
         # ----- layer selectors -----
         self.dtm_edit = QtWidgets.QLineEdit()
@@ -77,8 +84,8 @@ class UserTab(QtWidgets.QWidget):
         # ----- signal wiring -----
         self.act_pick.triggered.connect(self.on_pick_now)
         self.act_az.triggered.connect(self.on_toggle_azimuth)
-        self.act_qr.triggered.connect(self.on_make_qr)
         self.act_copy.triggered.connect(self.on_copy_gmaps)
+        self.act_qr.triggered.connect(self.on_make_qr)
         btn_load.clicked.connect(self.on_load_layers)
 
         # Auto-populate layer paths from shared state when available
@@ -131,6 +138,8 @@ class UserTab(QtWidgets.QWidget):
                 sc.addPixmap(pix)
                 self.map.setScene(sc)
                 self.map.fit()
+                if not self._az_item:
+                    self.on_toggle_azimuth()
             if dtm:
                 self._dtm_path = dtm
             self._toast("Layers loaded")
@@ -140,7 +149,57 @@ class UserTab(QtWidgets.QWidget):
     # ------------------------------------------------------------------
     # Actions - mostly placeholders for now
     def on_pick_now(self) -> None:
-        self._toast("Pick not implemented", error=True)
+        lay = self.video_container.layout()
+        if not self._ortho_layer or lay.count() == 0:
+            self._toast("Need video and orthophoto loaded", error=True)
+            return
+        vw = lay.itemAt(0).widget()
+        if not vw:
+            self._toast("No video widget", error=True)
+            return
+        pm = vw.grab()
+        img = pm.toImage()
+        dlg = SinglePickDialog(img, self)
+        if dlg.exec() != QtWidgets.QDialog.Accepted or dlg.picked_uv() is None:
+            return
+        uu, vv = dlg.picked_uv()
+        xs, ys = float(uu), float(vv)
+        try:
+            from pyproj import Transformer
+            X, Y = self._ortho_layer.scene_to_geo(xs, ys)
+            epsg = self._ortho_layer.ds.crs.to_epsg()
+            tr = Transformer.from_crs(f"EPSG:{epsg}", "EPSG:4326", always_xy=True)
+            lon, lat = tr.transform(X, Y)
+            self._last_pick = (lon, lat)
+            self._show_pick_on_map(xs, ys, text=f"{lat:.5f},{lon:.5f}")
+            QtWidgets.QApplication.clipboard().setText(f"{lat:.6f},{lon:.6f}")
+            self._toast("Copied to clipboard")
+        except Exception as e:
+            self._toast(f"Mapping failed: {e}", error=True)
+
+    def _show_pick_on_map(self, xs: float, ys: float, text: str | None = None) -> None:
+        sc = self.map.scene()
+        if sc is None:
+            sc = QtWidgets.QGraphicsScene()
+            self.map.setScene(sc)
+        if self._last_pick_item is None:
+            it = QtWidgets.QGraphicsEllipseItem(-5, -5, 10, 10)
+            it.setBrush(QtGui.QBrush(QtGui.QColor(255, 220, 0)))
+            it.setPen(QtGui.QPen(QtGui.QColor(30, 30, 30), 1))
+            it.setZValue(50)
+            sc.addItem(it)
+            self._last_pick_item = it
+        self._last_pick_item.setPos(xs, ys)
+        if text:
+            if self._last_pick_label is None:
+                lab = QtWidgets.QGraphicsSimpleTextItem("")
+                lab.setBrush(QtGui.QBrush(QtGui.QColor(255, 255, 255)))
+                lab.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0)))
+                lab.setZValue(51)
+                sc.addItem(lab)
+                self._last_pick_label = lab
+            self._last_pick_label.setText(text)
+            self._last_pick_label.setPos(xs + 10, ys - 10)
 
     def on_toggle_azimuth(self) -> None:
         sc = self.map.scene()
@@ -190,7 +249,7 @@ class UserTab(QtWidgets.QWidget):
     def _current_link_for_share(self) -> str | None:
         if not self._last_pick:
             return None
-        lon, lat, _ = self._last_pick
+        lon, lat = self._last_pick
         return f"https://www.google.com/maps/search/?api=1&query={lat:.6f},{lon:.6f}"
 
     def _toast(self, msg: str, *, error: bool = False) -> None:

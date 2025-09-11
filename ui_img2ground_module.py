@@ -25,6 +25,7 @@ from raster_layer import RasterLayer
 from ui_common import VlcVideoWidget
 from ui_calibration_module import HorizonAzimuthCalibrationDialog
 import shared_state
+from app_state import app_state
 
 from onvif_ptz import OnvifPTZClient, PTZReading
 
@@ -442,6 +443,43 @@ class Img2GroundModule(QtCore.QObject):
         rowm.addStretch(1); rowm.addWidget(self.btn_reset)
         g.addLayout(rowm, r, 0, 1, 8); r += 1
 
+        # camera model / calibration
+        self.chk_use_active = QtWidgets.QCheckBox("Use active camera (from RTSP tab)")
+        self.chk_use_active.toggled.connect(self.use_active_camera)
+        self.btn_refresh_cam = QtWidgets.QPushButton("\uD83D\uDD04 Refresh from live")
+        self.btn_refresh_cam.clicked.connect(lambda: self.use_active_camera(force=True))
+        self.chk_lock_cam = QtWidgets.QCheckBox("\U0001F512 Lock")
+        self.chk_lock_cam.toggled.connect(self._update_lock_cam)
+        hrow = QtWidgets.QHBoxLayout()
+        hrow.addWidget(self.chk_use_active)
+        hrow.addWidget(self.btn_refresh_cam)
+        hrow.addWidget(self.chk_lock_cam)
+        hrow.addStretch(1)
+        g.addLayout(hrow, r, 0, 1, 8); r += 1
+
+        grp_cam = QtWidgets.QGroupBox("Camera Model (Calibration)")
+        grp_cam.setToolTip("This refers to intrinsic/extrinsic parameters. Click 'Use active camera' to import from your live connection.")
+        glc = QtWidgets.QGridLayout(grp_cam)
+        self.fx = QtWidgets.QDoubleSpinBox(); self.fx.setRange(-1e6, 1e6)
+        self.fy = QtWidgets.QDoubleSpinBox(); self.fy.setRange(-1e6, 1e6)
+        self.cx = QtWidgets.QDoubleSpinBox(); self.cx.setRange(-1e6, 1e6)
+        self.cy = QtWidgets.QDoubleSpinBox(); self.cy.setRange(-1e6, 1e6)
+        self.k1 = QtWidgets.QDoubleSpinBox(); self.k1.setRange(-1e3, 1e3)
+        self.k2 = QtWidgets.QDoubleSpinBox(); self.k2.setRange(-1e3, 1e3)
+        self.p1 = QtWidgets.QDoubleSpinBox(); self.p1.setRange(-1e3, 1e3)
+        self.p2 = QtWidgets.QDoubleSpinBox(); self.p2.setRange(-1e3, 1e3)
+        self.k3 = QtWidgets.QDoubleSpinBox(); self.k3.setRange(-1e3, 1e3)
+        glc.addWidget(QtWidgets.QLabel("fx"),0,0); glc.addWidget(self.fx,0,1)
+        glc.addWidget(QtWidgets.QLabel("fy"),0,2); glc.addWidget(self.fy,0,3)
+        glc.addWidget(QtWidgets.QLabel("cx"),1,0); glc.addWidget(self.cx,1,1)
+        glc.addWidget(QtWidgets.QLabel("cy"),1,2); glc.addWidget(self.cy,1,3)
+        glc.addWidget(QtWidgets.QLabel("k1"),2,0); glc.addWidget(self.k1,2,1)
+        glc.addWidget(QtWidgets.QLabel("k2"),2,2); glc.addWidget(self.k2,2,3)
+        glc.addWidget(QtWidgets.QLabel("p1"),3,0); glc.addWidget(self.p1,3,1)
+        glc.addWidget(QtWidgets.QLabel("p2"),3,2); glc.addWidget(self.p2,3,3)
+        glc.addWidget(QtWidgets.QLabel("k3"),4,0); glc.addWidget(self.k3,4,1)
+        g.addWidget(grp_cam, r, 0, 1, 8); r += 1
+
         # PTZ group
         grp = QtWidgets.QGroupBox("PTZ / ONVIF")
         gl = QtWidgets.QGridLayout(grp)
@@ -484,6 +522,7 @@ class Img2GroundModule(QtCore.QObject):
 
         g.setRowStretch(r, 1)
         self._update_mode_enabled()
+        self._update_lock_cam()
         return w
 
     # ----- VLC -----
@@ -536,6 +575,35 @@ class Img2GroundModule(QtCore.QObject):
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "VLC", f"Failed to play:\n{e}")
             self._log(f"_set_media failed: {e}")
+
+    def _update_lock_cam(self):
+        lock = self.chk_lock_cam.isChecked()
+        for w in (self.fx, self.fy, self.cx, self.cy, self.k1, self.k2, self.p1, self.p2, self.k3):
+            w.setReadOnly(lock)
+
+    def use_active_camera(self, force: bool = False):
+        if not force and not self.chk_use_active.isChecked():
+            return
+        ctx = app_state.current_camera
+        if not ctx:
+            QtWidgets.QMessageBox.warning(None, "Active camera", "No active camera")
+            return
+        if ctx.rtsp_url:
+            self.ed_rtsp.setText(ctx.rtsp_url)
+        if self.chk_lock_cam.isChecked():
+            return
+        if ctx.intrinsics:
+            self.fx.setValue(ctx.intrinsics.fx)
+            self.fy.setValue(ctx.intrinsics.fy)
+            self.cx.setValue(ctx.intrinsics.cx)
+            self.cy.setValue(ctx.intrinsics.cy)
+        if ctx.distortion:
+            self.k1.setValue(ctx.distortion.k1)
+            self.k2.setValue(ctx.distortion.k2)
+            self.p1.setValue(ctx.distortion.p1)
+            self.p2.setValue(ctx.distortion.p2)
+            if ctx.distortion.k3 is not None:
+                self.k3.setValue(ctx.distortion.k3)
 
     # ----- Ortho / Map -----
     def _ensure_scene(self) -> QtWidgets.QGraphicsScene:

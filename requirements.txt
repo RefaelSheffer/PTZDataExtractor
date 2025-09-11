@@ -1,2 +1,5 @@
+numpy
 onvif-zeep
+pyproj
+PySide6
 qrcode[pil]

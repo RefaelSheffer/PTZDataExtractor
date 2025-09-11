@@ -114,11 +114,12 @@ class UserTab(QtWidgets.QWidget):
             return
 
         vw = VlcVideoWidget(self._vlc)
+        lay.addWidget(vw)
+        vw.ensure_video_out()
         media = self._vlc.media_new(cam.rtsp_url)
         player = vw.player()
         player.set_media(media)
         player.play()
-        lay.addWidget(vw)
 
     # ------------------------------------------------------------------
     # Layers

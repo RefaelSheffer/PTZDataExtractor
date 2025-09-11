@@ -374,6 +374,7 @@ class Img2GroundModule(QtCore.QObject):
         self._hfov_deg: Optional[float] = None
         self._fx_from_hfov: Optional[float] = None
         self._fov_items: List[QtWidgets.QGraphicsLineItem] = []
+        self._azimuth_item: Optional[QtWidgets.QGraphicsLineItem] = None
 
         # last pick
         self._last_geo = None
@@ -713,6 +714,38 @@ class Img2GroundModule(QtCore.QObject):
         except Exception:
             pass
 
+    # ----- Azimuth line drawing -----
+    def _remove_azimuth_line(self):
+        if self._azimuth_item is not None:
+            try: self._azimuth_item.scene().removeItem(self._azimuth_item)
+            except Exception: pass
+            self._azimuth_item = None
+
+    def _draw_azimuth_line(self, o: np.ndarray, d: np.ndarray, georef: GeoRef, length: float = 200.0):
+        self._remove_azimuth_line()
+        if self._ortho_layer is None:
+            return
+        dir_xy = np.array([d[0], d[1]], dtype=float)
+        n = np.linalg.norm(dir_xy)
+        if n < 1e-6:
+            return
+        dir_xy /= n
+        start = o
+        end = o + np.array([dir_xy[0]*length, dir_xy[1]*length, 0.0])
+        try:
+            g1 = georef.local_to_geographic(start)
+            g2 = georef.local_to_geographic(end)
+            prj1, prj2 = g1.get("projected"), g2.get("projected")
+            if prj1 and prj2:
+                xs1, ys1 = self._ortho_layer.geo_to_scene(prj1["x"], prj1["y"])
+                xs2, ys2 = self._ortho_layer.geo_to_scene(prj2["x"], prj2["y"])
+                sc = self._ensure_scene()
+                pen = QtGui.QPen(QtGui.QColor(255, 0, 0), 2); pen.setCosmetic(True)
+                self._azimuth_item = sc.addLine(xs1, ys1, xs2, ys2, pen)
+                self._azimuth_item.setZValue(25)
+        except Exception:
+            pass
+
     # ----- Homography calibration -----
     def _run_homography_dialog(self):
         if self._ortho_layer is None:
@@ -883,7 +916,7 @@ class Img2GroundModule(QtCore.QObject):
         return (xs, ys)
 
     def _map_by_ptz(self, u: int, v: int) -> bool:
-        if not (self._bundle and self._dtm and self._ortho_layer and self._yaw_offset_deg is not None):
+        if not (self._bundle and self._ortho_layer and self._yaw_offset_deg is not None):
             return False
         intr_d = self._bundle["intrinsics"]
         W = intr_d["width"]; H = intr_d["height"]
@@ -901,8 +934,18 @@ class Img2GroundModule(QtCore.QObject):
         pose = CameraPose(pose_d["x"], pose_d["y"], pose_d["z"], yaw, pitch, roll)
         o, d = camera_ray_in_world(u, v, intr, pose)
         georef = GeoRef.from_dict(self._bundle["georef"])
+
+        # always draw azimuth line
+        self._draw_azimuth_line(o, d, georef)
+
+        if self._dtm is None:
+            self._remove_last_pick()
+            self.lbl_status.setText("No DTM: showing azimuth only.")
+            return True
+
         p = intersect_ray_with_dtm(o, d, self._dtm, georef)
         if p is None:
+            self._remove_last_pick()
             self.lbl_status.setText("Missed DTM / No intersection."); return True
         g = georef.local_to_geographic(p)
         lla = g["lla"]; prj = g["projected"]
@@ -967,7 +1010,7 @@ class Img2GroundModule(QtCore.QObject):
     def _reset_calibration(self):
         self._H = None; self._calib_img_wh = None; self._remove_video_frame_outline()
         self._hfov_deg = None; self._fx_from_hfov = None; self._yaw_offset_deg = None; self._remove_fov_wedge()
-        self._remove_last_pick()
+        self._remove_last_pick(); self._remove_azimuth_line()
         self.lbl_status.setText("Calibration cleared.")
 
     def _update_metrics(self):

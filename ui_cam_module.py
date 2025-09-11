@@ -85,6 +85,9 @@ class CameraModule(QtCore.QObject):
         self._rec_retry_attempts = 0
         self._rec_retry_pending = False
 
+        # Track last successful connection transport
+        self._last_conn_force_tcp = True
+
     # ---- public API for the shell ----
     def widget(self) -> QtWidgets.QWidget:
         return self._root
@@ -384,7 +387,7 @@ class CameraModule(QtCore.QObject):
         if pp:
             self.rtsp_path.setText(pp)
         host = host.strip(); user = self.user.text().strip(); pwd = self.pwd.text().strip()
-        ffprobe = self.ffprobe_path.text().strip() or which("ffprobe") or "ffprobe"
+        ffprobe = self._get_ffprobe()
         forbidden = 0
 
         urls: List[str] = []
@@ -451,16 +454,23 @@ class CameraModule(QtCore.QObject):
             return f"{sch}://{user}:{pwd}@{rest}"
         return url
 
-    def _probe_codec(self, url: str, user: str, pwd: str) -> str:
-        ffprobe = self.ffprobe_path.text().strip() or which("ffprobe") or "ffprobe"
+    def _get_ffprobe(self) -> str:
+        fp = self.ffprobe_path.text().strip()
+        if fp and not Path(fp).exists():
+            self.ffprobe_path.setText("")
+            fp = ""
+        return fp or which("ffprobe") or "ffprobe"
+    def _probe_codec(self, url: str, user: str, pwd: str, prefer_tcp: bool) -> tuple:
+        ffprobe = self._get_ffprobe()
         ok, msg = probe_rtsp(ffprobe, url, user, pwd,
-                             prefer_tcp=self.force_tcp.isChecked(), timeout_ms=3500)
+                             prefer_tcp=prefer_tcp, timeout_ms=3500)
         self._log(f"Probe {url} -> {msg}")
+        codec = ""
         if ok:
             m = re.search(r"\(([^)]+)\)", msg)
             if m:
-                return m.group(1).strip().lower()
-        return ""
+                codec = m.group(1).strip().lower()
+        return ok, codec, msg
 
     def _guess_h264_alt_rtsp(self, path: str) -> Optional[str]:
         if "subtype=" in path and "subtype=1" not in path:
@@ -498,19 +508,31 @@ class CameraModule(QtCore.QObject):
         if pp: self.rtsp_path.setText(pp)
         user = self.user.text().strip(); pwd = self.pwd.text().strip()
 
+        tcp = self.force_tcp.isChecked()
+
         if mode.startswith("RTSP"):
             url = self._compose_rtsp_url()
-            codec = self._probe_codec(url, user, pwd)
+            ok, codec, msg = self._probe_codec(url, user, pwd, tcp)
+            if not ok and tcp and "Timeout" in msg:
+                ok, codec, msg = self._probe_codec(url, user, pwd, False)
+                if ok:
+                    tcp = False
             self._last_codec = codec
             if self.prefer_h264 and codec in ("hevc", "h265"):
                 alt_path = self._guess_h264_alt_rtsp(self.rtsp_path.text().strip())
                 if alt_path:
                     alt_url = f"rtsp://{h}:{self.rtsp_port.value()}{alt_path}"
-                    if self._probe_codec(alt_url, user, pwd) == "h264":
+                    ok2, codec2, msg2 = self._probe_codec(alt_url, user, pwd, tcp)
+                    if not ok2 and tcp and "Timeout" in msg2:
+                        ok2, codec2, msg2 = self._probe_codec(alt_url, user, pwd, False)
+                        if ok2:
+                            tcp = False
+                    if ok2 and codec2 == "h264":
                         self.rtsp_path.setText(alt_path)
                         url = alt_url
+                        codec = codec2
             self._hevc_guard_tried = False
-            self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
+            self._start_player(url, force_tcp=tcp, user=user, pwd=pwd)
             # פרסום הגדרות PTZ
             self._publish_ptz_cfg()
             self._start_ptz_meta(h, user, pwd)
@@ -525,14 +547,25 @@ class CameraModule(QtCore.QObject):
             QtWidgets.QMessageBox.critical(self._root, "ONVIF error", res)
             return
         url = res
-        codec = self._probe_codec(url, user, pwd)
+        ok, codec, msg = self._probe_codec(url, user, pwd, tcp)
+        if not ok and tcp and "Timeout" in msg:
+            ok, codec, msg = self._probe_codec(url, user, pwd, False)
+            if ok:
+                tcp = False
         self._last_codec = codec
         if self.prefer_h264 and codec in ("hevc", "h265"):
             alt = self._guess_h264_alt_onvif(h, int(self.onvif_port.value()), user, pwd)
-            if alt and self._probe_codec(alt, user, pwd) == "h264":
-                url = alt
+            if alt:
+                ok2, codec2, msg2 = self._probe_codec(alt, user, pwd, tcp)
+                if not ok2 and tcp and "Timeout" in msg2:
+                    ok2, codec2, msg2 = self._probe_codec(alt, user, pwd, False)
+                    if ok2:
+                        tcp = False
+                if ok2 and codec2 == "h264":
+                    url = alt
+                    codec = codec2
         self._hevc_guard_tried = False
-        self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
+        self._start_player(url, force_tcp=tcp, user=user, pwd=pwd)
         # פרסום הגדרות PTZ
         self._publish_ptz_cfg()
         self._start_ptz_meta(h, user, pwd)
@@ -557,7 +590,7 @@ class CameraModule(QtCore.QObject):
         url_noauth = self._compose_rtsp_url()
         url_auth   = self._compose_rtsp_url_with_auth()
 
-        ffprobe = self.ffprobe_path.text().strip() or which("ffprobe") or "ffprobe"
+        ffprobe = self._get_ffprobe()
         ok1, msg1 = probe_rtsp(ffprobe, url_noauth, self.user.text().strip(), self.pwd.text().strip(),
                                prefer_tcp=self.force_tcp.isChecked(), timeout_ms=2500)
         if not ok1 and (url_auth != url_noauth):
@@ -576,7 +609,10 @@ class CameraModule(QtCore.QObject):
     def _open_external_vlc(self):
         url = self._compose_rtsp_url_with_auth()
         exe = default_vlc_path()
-        cmd = [exe, "--rtsp-tcp", url]
+        cmd = [exe]
+        if self._last_conn_force_tcp:
+            cmd.append("--rtsp-tcp")
+        cmd.append(url)
         try:
             subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -612,6 +648,7 @@ class CameraModule(QtCore.QObject):
         # remember params for auto-retry
         self._retry_url = url
         self._retry_force_tcp = force_tcp
+        self._last_conn_force_tcp = force_tcp
         self._retry_user = user
         self._retry_pwd = pwd
         if reset_retry:
@@ -790,20 +827,30 @@ class CameraModule(QtCore.QObject):
             alt_path = self._guess_h264_alt_rtsp(self.rtsp_path.text().strip())
             if alt_path:
                 alt_url = f"rtsp://{h}:{self.rtsp_port.value()}{alt_path}"
-                codec = self._probe_codec(alt_url, user, pwd)
-                if codec == "h264":
+                tcp = self._last_conn_force_tcp
+                ok, codec, msg = self._probe_codec(alt_url, user, pwd, tcp)
+                if not ok and tcp and "Timeout" in msg:
+                    ok, codec, msg = self._probe_codec(alt_url, user, pwd, False)
+                    if ok:
+                        tcp = False
+                if ok and codec == "h264":
                     self.rtsp_path.setText(alt_path)
                     self._last_codec = codec
-                    self._start_player(alt_url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
+                    self._start_player(alt_url, force_tcp=tcp, user=user, pwd=pwd)
                     self._log("HEVC Guard: fallback to H.264 -> " + alt_url)
                     return
         else:
             alt = self._guess_h264_alt_onvif(h, int(self.onvif_port.value()), user, pwd)
             if alt:
-                codec = self._probe_codec(alt, user, pwd)
-                if codec == "h264":
+                tcp = self._last_conn_force_tcp
+                ok, codec, msg = self._probe_codec(alt, user, pwd, tcp)
+                if not ok and tcp and "Timeout" in msg:
+                    ok, codec, msg = self._probe_codec(alt, user, pwd, False)
+                    if ok:
+                        tcp = False
+                if ok and codec == "h264":
                     self._last_codec = codec
-                    self._start_player(alt, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
+                    self._start_player(alt, force_tcp=tcp, user=user, pwd=pwd)
                     self._log("HEVC Guard: fallback to H.264 -> " + alt)
                     return
         self._log("HEVC Guard: H.264 fallback failed")

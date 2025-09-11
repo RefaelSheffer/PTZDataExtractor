@@ -650,6 +650,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._retry_timer = QtCore.QTimer(self); self._retry_timer.setInterval(3500)
         self._retry_timer.timeout.connect(self._maybe_retry_preview)
         self._last_url = ""; self._last_user = ""; self._last_pwd=""; self._last_force_tcp=True
+        self._last_conn_force_tcp = True
         self._preview_retries = 0
 
         self.request_preview_retry.connect(self._schedule_retry_preview_main)
@@ -715,7 +716,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if pp:
             self.rtsp_path.setText(pp)
         host = host.strip(); user = self.user.text().strip(); pwd = self.pwd.text().strip()
-        ffprobe = self.ffprobe_path.text().strip() or which("ffprobe") or "ffprobe"
+        ffprobe = self._get_ffprobe()
         forbidden = 0
 
         urls: List[str] = []
@@ -772,6 +773,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path.startswith("/"): path = "/" + path
         return f"rtsp://{h}:{port}{path}"
 
+    def _get_ffprobe(self) -> str:
+        fp = self.ffprobe_path.text().strip()
+        if fp and not Path(fp).exists():
+            self.ffprobe_path.setText("")
+            fp = ""
+        return fp or which("ffprobe") or "ffprobe"
+
     def _connect_real(self):
         mode = self.real_mode.currentText()
         host_in = self.host.text().strip()
@@ -780,29 +788,51 @@ class MainWindow(QtWidgets.QMainWindow):
         if pp: self.rtsp_path.setText(pp)
         user = self.user.text().strip(); pwd = self.pwd.text().strip()
 
+        tcp = self.force_tcp.isChecked()
         if mode.startswith("RTSP"):
             url = self._compose_rtsp_url()
-            ffprobe = self.ffprobe_path.text().strip() or which("ffprobe") or "ffprobe"
-            ok, msg = probe_rtsp(ffprobe, url, user, pwd, prefer_tcp=self.force_tcp.isChecked(), timeout_ms=self.probe_timeout_sp.value())
+            ffprobe = self._get_ffprobe()
+            ok, msg = probe_rtsp(ffprobe, url, user, pwd, prefer_tcp=tcp, timeout_ms=self.probe_timeout_sp.value())
+            if not ok and tcp and "Timeout" in msg:
+                ok, msg = probe_rtsp(ffprobe, url, user, pwd, prefer_tcp=False, timeout_ms=self.probe_timeout_sp.value())
+                if ok:
+                    tcp = False
             self._log(f"Probe → {msg}")
-            # גם אם נכשל — ננסה VLC (ייתכן ש-ffprobe חסר/חסום)
-            self._start_player(url, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
+            self._start_player(url, force_tcp=tcp, user=user, pwd=pwd)
             return
 
         if ONVIFCamera is None:
             QtWidgets.QMessageBox.critical(self, "ONVIF missing", "pip install onvif-zeep"); return
-        try:
-            cam = ONVIFCamera(h, int(self.onvif_port.value()), user, pwd)
-            media = cam.create_media_service()
-            prof = media.GetProfiles()[0]
-            params = media.create_type('GetStreamUri')
-            params.StreamSetup = {'Stream':'RTP-Unicast','Transport':{'Protocol':'RTSP'}}
-            params.ProfileToken = prof.token
-            uri = media.GetStreamUri(params).Uri
-            self._log("ONVIF URI obtained")
-            self._start_player(uri, force_tcp=self.force_tcp.isChecked(), user=user, pwd=pwd)
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "ONVIF error", str(e))
+        ports = [int(self.onvif_port.value())]
+        if ports[0] != 80:
+            ports.append(80)
+        uri = None
+        last_err = ""
+        for port in ports:
+            try:
+                cam = ONVIFCamera(h, port, user, pwd)
+                media = cam.create_media_service()
+                prof = media.GetProfiles()[0]
+                params = media.create_type('GetStreamUri')
+                params.StreamSetup = {'Stream':'RTP-Unicast','Transport':{'Protocol':'RTSP'}}
+                params.ProfileToken = prof.token
+                uri = media.GetStreamUri(params).Uri
+                self._log(f"ONVIF URI obtained (port {port})")
+                break
+            except Exception as e:
+                last_err = str(e)
+                continue
+        if not uri:
+            QtWidgets.QMessageBox.critical(self, "ONVIF error", last_err)
+            return
+        ffprobe = self._get_ffprobe()
+        ok, msg = probe_rtsp(ffprobe, uri, user, pwd, prefer_tcp=tcp, timeout_ms=self.probe_timeout_sp.value())
+        if not ok and tcp and "Timeout" in msg:
+            ok, msg = probe_rtsp(ffprobe, uri, user, pwd, prefer_tcp=False, timeout_ms=self.probe_timeout_sp.value())
+            if ok:
+                tcp = False
+        self._log(f"Probe → {msg}")
+        self._start_player(uri, force_tcp=tcp, user=user, pwd=pwd)
 
     # ===== Quick tools =====
     def _quick_check(self):
@@ -822,7 +852,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ok_onvif = port_ok(h, onvif_port)
 
         url_noauth = self._compose_rtsp_url()
-        ffprobe = self.ffprobe_path.text().strip() or which("ffprobe") or "ffprobe"
+        ffprobe = self._get_ffprobe()
         ok1, msg1 = probe_rtsp(ffprobe, url_noauth, self.user.text().strip(), self.pwd.text().strip(),
                                prefer_tcp=self.force_tcp.isChecked(), timeout_ms=self.probe_timeout_sp.value())
 
@@ -835,7 +865,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def _open_external_vlc(self):
         url = self._compose_rtsp_url()  # בלי קרדנציאלס
         exe = default_vlc_path()
-        cmd = [exe, "--rtsp-tcp", url, f"--rtsp-user={self.user.text().strip()}", f"--rtsp-pwd={self.pwd.text().strip()}"]
+        cmd = [exe]
+        if self._last_conn_force_tcp:
+            cmd.append("--rtsp-tcp")
+        cmd.extend([url, f"--rtsp-user={self.user.text().strip()}", f"--rtsp-pwd={self.pwd.text().strip()}"])
         try:
             subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              creationflags=(subprocess.CREATE_NO_WINDOW if platform.system()=="Windows" else 0))
@@ -867,6 +900,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._log("Player started")
 
         self._last_url, self._last_user, self._last_pwd, self._last_force_tcp = url, user, pwd, force_tcp
+        self._last_conn_force_tcp = force_tcp
         self._preview_retries = 0
 
         if self.auto_retry_preview_cb.isChecked():

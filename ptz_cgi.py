@@ -64,6 +64,7 @@ class PtzCgiThread:
         self._csv_writer = None
         self._th: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        self._has_data = False
 
     def start(self) -> None:
         self._stop.clear()
@@ -157,6 +158,9 @@ class PtzCgiThread:
         while not self._stop.is_set():
             txt = self._fetch_text()
             if txt:
+                if not self._has_data:
+                    print(f"PTZ CGI data available: {txt.strip()}")
+                    self._has_data = True
                 st = self._parse(txt)
                 self._status = st
                 self._last.pan_deg = st.pan_deg
@@ -191,4 +195,8 @@ class PtzCgiThread:
                         self._csv_file.flush()
                     except Exception:
                         pass
+            else:
+                if self._has_data:
+                    print("PTZ CGI data unavailable")
+                    self._has_data = False
             time.sleep(self.poll_dt)

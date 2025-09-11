@@ -381,6 +381,30 @@ class CameraModule(QtCore.QObject):
             return
         self._start_player(url)
 
+        # --- publish + set Active Camera ---
+        h = parse_host_from_rtsp(url) or ""
+        user = self.user.text().strip()
+        pwd = self.pwd.text().strip()
+        tcp = True
+
+        width = height = fps = None
+        codec = ""
+        ok, codec, msg = self._probe_codec(url, user, pwd, tcp)
+        if ok:
+            m = re.search(r"(\d+)x(\d+)", msg)
+            if m:
+                width, height = int(m.group(1)), int(m.group(2))
+            m = re.search(r"(\d+(?:\.\d+)?)\s*fps", msg, re.IGNORECASE)
+            if m:
+                try:
+                    fps = float(m.group(1))
+                except Exception:
+                    pass
+
+        self._publish_ptz_cfg()
+        self._start_ptz_meta(h, user, pwd)
+        self._update_live_context(url, h, tcp, codec, width, height, fps, user, pwd)
+
     # ===== Real =====
     def _auto_try_dahua(self):
         host, hp, pp = sanitize_host(self.host.text())

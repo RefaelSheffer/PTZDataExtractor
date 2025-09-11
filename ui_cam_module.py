@@ -69,6 +69,14 @@ class CameraModule(QtCore.QObject):
             self._cfg.get("silence_native_stderr", self._cfg.get("suppress_stderr", False))
         )
         self._root = self._build_ui()
+        # Default to online mode unless overridden by config
+        self.radio_online.setChecked(True)
+        self.radio_mockup.setChecked(False)
+        mode = self._cfg.get("camera_mode")
+        if mode is not None:
+            self.radio_online.setChecked(mode == "online")
+            self.radio_mockup.setChecked(mode == "mockup")
+        self._on_mode_changed()
         self._hevc_guard_tried = False
         self._last_codec = ""
         self._ptz_meta: Optional[PtzMetaThread] = None
@@ -100,8 +108,12 @@ class CameraModule(QtCore.QObject):
         vbox = QtWidgets.QVBoxLayout(root)
 
         # Mode selector (pages)
-        self.mode = QtWidgets.QComboBox(); self.mode.addItems(["Mockup (local RTSP)", "Real camera (RTSP/ONVIF)"])
-        vbox.addWidget(self.mode)
+        mode_box = QtWidgets.QHBoxLayout()
+        self.radio_mockup = QtWidgets.QRadioButton("Mockup (local RTSP)")
+        self.radio_online = QtWidgets.QRadioButton("Real camera (RTSP/ONVIF)")
+        mode_box.addWidget(self.radio_mockup)
+        mode_box.addWidget(self.radio_online)
+        vbox.addLayout(mode_box)
         self.stack = QtWidgets.QStackedWidget(); vbox.addWidget(self.stack, 1)
 
         # ---------- Mock page ----------
@@ -283,7 +295,8 @@ class CameraModule(QtCore.QObject):
         self.recorder.failed.connect(lambda msg: (self._log(f"Recorder failed: {msg}"), self._set_rec_indicator(False)))
 
         # ---------- Signals ----------
-        self.mode.currentIndexChanged.connect(self.stack.setCurrentIndex)
+        self.radio_mockup.toggled.connect(self._on_mode_changed)
+        self.radio_online.toggled.connect(self._on_mode_changed)
         self.btn_start_srv.clicked.connect(self._start_mock_server)
         self.btn_stop_srv .clicked.connect(self._stop_mock_server)
         self.btn_connect_mock.clicked.connect(self._connect_mock)
@@ -323,6 +336,12 @@ class CameraModule(QtCore.QObject):
         ev.event_attach(vlc.EventType.MediaPlayerEndReached, lambda e: self._log("VLC: EndReached"))
 
         return root
+
+    def _on_mode_changed(self):
+        self.stack.setCurrentIndex(0 if self.radio_mockup.isChecked() else 1)
+        app_state.stream_mode = "online" if self.radio_online.isChecked() else "mockup"
+        shared_state.signal_stream_mode_changed.emit(app_state.stream_mode)
+        self._save_app_cfg()
 
     # ===== Mock =====
     def _choose_mp4(self):
@@ -873,7 +892,7 @@ class CameraModule(QtCore.QObject):
         self._log(f"Recording -> {out_path}")
     # ===== HEVC guard =====
     def _hevc_guard_check(self):
-        if self._hevc_guard_tried or self.mode.currentIndex() == 0:
+        if self._hevc_guard_tried or self.radio_mockup.isChecked():
             return
         p = self.video.player()
         if p is None:
@@ -985,10 +1004,19 @@ class CameraModule(QtCore.QObject):
     # Public helpers for project IO
     def get_profile(self) -> dict:
         """Return current camera connection settings as a profile dict."""
-        return self._profile_from_ui()
+        p = self._profile_from_ui()
+        p["camera_mode"] = "online" if self.radio_online.isChecked() else "mockup"
+        return p
 
     def apply_profile(self, p: dict) -> None:
         """Populate the UI from a profile dict."""
+        mode = p.get("camera_mode")
+        if mode is None:
+            self.radio_online.setChecked(True)
+        else:
+            self.radio_online.setChecked(mode == "online")
+            self.radio_mockup.setChecked(mode == "mockup")
+        self._on_mode_changed()
         self._apply_profile(p)
 
     def _apply_profile(self, p: dict):
@@ -1085,6 +1113,7 @@ class CameraModule(QtCore.QObject):
             "ptz_cgi_channel": self.ptz_cgi_channel.value(),
             "ptz_cgi_poll_hz": self.ptz_cgi_poll.value(),
             "ptz_cgi_https": self.ptz_cgi_https.isChecked(),
+            "camera_mode": "online" if self.radio_online.isChecked() else "mockup",
         })
         self._cfg.pop("suppress_stderr", None)
         save_cfg(self._cfg)

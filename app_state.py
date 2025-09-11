@@ -41,6 +41,7 @@ class LiveCameraContext:
 class AppState:
     def __init__(self) -> None:
         self.current_camera: Optional[LiveCameraContext] = None
+        self.stream_mode: str = "online"
 
 
 app_state = AppState()

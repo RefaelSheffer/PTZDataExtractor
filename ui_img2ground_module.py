@@ -23,6 +23,7 @@ from dtm import DTM
 from ui_map_tools import MapView, numpy_to_qimage
 from raster_layer import RasterLayer
 from ui_common import VlcVideoWidget
+from ui_calibration_module import HorizonAzimuthCalibrationDialog
 import shared_state
 
 from onvif_ptz import OnvifPTZClient, PTZReading
@@ -436,7 +437,8 @@ class Img2GroundModule(QtCore.QObject):
         self.btn_use_shared = QtWidgets.QPushButton("Use Orthophoto from Preparation"); self.btn_use_shared.clicked.connect(self._try_load_shared_ortho)
         self.btn_reset = QtWidgets.QPushButton("Reset calibration"); self.btn_reset.clicked.connect(self._reset_calibration)
         self.btn_homo_cal = QtWidgets.QPushButton("Homography calibration…"); self.btn_homo_cal.clicked.connect(self._run_homography_dialog)
-        rowm.addWidget(self.btn_load_ortho); rowm.addWidget(self.btn_use_shared); rowm.addWidget(self.btn_homo_cal)
+        self.btn_calib_tools = QtWidgets.QPushButton("Calib tools…"); self.btn_calib_tools.clicked.connect(self._open_calib_tools)
+        rowm.addWidget(self.btn_load_ortho); rowm.addWidget(self.btn_use_shared); rowm.addWidget(self.btn_homo_cal); rowm.addWidget(self.btn_calib_tools)
         rowm.addStretch(1); rowm.addWidget(self.btn_reset)
         g.addLayout(rowm, r, 0, 1, 8); r += 1
 
@@ -745,6 +747,10 @@ class Img2GroundModule(QtCore.QObject):
                 self._azimuth_item.setZValue(25)
         except Exception:
             pass
+
+    def _open_calib_tools(self):
+        dlg = HorizonAzimuthCalibrationDialog(self._root)
+        dlg.exec()
 
     # ----- Homography calibration -----
     def _run_homography_dialog(self):

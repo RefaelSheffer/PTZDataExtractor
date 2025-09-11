@@ -20,7 +20,7 @@ from camera_io import (
     onvif_get_rtsp_uri, ONVIFCamera
 )
 from onvif_ptz import PtzMetaThread
-from ptz_cgi import PtzCgiThread
+from any_ptz_client import AnyPTZClient
 
 from ui_common import VlcVideoWidget, default_vlc_path, open_folder, redact
 import shared_state  # <<< לשיתוף הגדרות ה-PTZ עם מודולים אחרים
@@ -72,7 +72,7 @@ class CameraModule(QtCore.QObject):
         self._hevc_guard_tried = False
         self._last_codec = ""
         self._ptz_meta: Optional[PtzMetaThread] = None
-        self._ptz_cgi: Optional[PtzCgiThread] = None
+        self._ptz_client: Optional[AnyPTZClient] = None
 
         # Auto-retry state for preview
         self._retry_url = ""
@@ -717,12 +717,12 @@ class CameraModule(QtCore.QObject):
             except Exception:
                 pass
             self._ptz_meta = None
-        if self._ptz_cgi:
+        if self._ptz_client:
             try:
-                self._ptz_cgi.stop()
+                self._ptz_client.stop()
             except Exception:
                 pass
-            self._ptz_cgi = None
+            self._ptz_client = None
 
         # cancel auto-retry
         self._retry_url = ""
@@ -1101,38 +1101,40 @@ class CameraModule(QtCore.QObject):
             except Exception:
                 pass
             self._ptz_meta = None
-        if self._ptz_cgi:
+        if self._ptz_client:
             try:
-                self._ptz_cgi.stop()
+                self._ptz_client.stop()
             except Exception:
                 pass
-            self._ptz_cgi = None
+            self._ptz_client = None
 
         csv_path = str(Path.cwd() / 'ptz_log.csv')
         onvif_port = int(self.onvif_port.value())
+        port = int(self.ptz_cgi_port.value())
+        chan = int(self.ptz_cgi_channel.value())
+        hz = float(self.ptz_cgi_poll.value())
+        https = self.ptz_cgi_https.isChecked()
         try:
-            self._ptz_meta = PtzMetaThread(host, onvif_port, user, pwd, poll_hz=5.0,
-                                          csv_path=csv_path)
+            self._ptz_client = AnyPTZClient(
+                host,
+                onvif_port,
+                user,
+                pwd,
+                cgi_port=port,
+                cgi_channel=chan,
+                cgi_poll_hz=hz,
+                https=https,
+            )
+            self._ptz_meta = PtzMetaThread(
+                client=self._ptz_client,
+                sensor_width_mm=6.4,
+                csv_path=csv_path,
+            )
             self._ptz_meta.start()
-            self._log(f"PTZ telemetry logging -> {csv_path}")
-            return
-        except Exception as e_onvif:
-            self._log(f"ONVIF telemetry failed: {e_onvif}")
-
-        try:
-            port = int(self.ptz_cgi_port.value())
-            chan = int(self.ptz_cgi_channel.value())
-            hz = float(self.ptz_cgi_poll.value())
-            https = self.ptz_cgi_https.isChecked()
-            self._ptz_cgi = PtzCgiThread(host, port, user, pwd, channel=chan,
-                                         poll_hz=hz, https=https)
-            self._ptz_meta = PtzMetaThread(client=self._ptz_cgi,
-                                          sensor_width_mm=6.4,
-                                          csv_path=csv_path)
-            self._ptz_meta.start()
-            self._log(f"PTZ CGI telemetry logging -> {csv_path}")
-        except Exception as e_cgi:
-            self._log(f"Failed to start PTZ telemetry: ONVIF ({e_onvif}); CGI fallback failed ({e_cgi})")
+            mode = self._ptz_client.mode.upper() if self._ptz_client.mode else ""
+            self._log(f"PTZ telemetry ({mode}) logging -> {csv_path}")
+        except Exception as e:
+            self._log(f"Failed to start PTZ telemetry: {e}")
 
     def _update_live_context(self, url: str, host: str, tcp: bool, codec: str,
                               width: Optional[int], height: Optional[int],

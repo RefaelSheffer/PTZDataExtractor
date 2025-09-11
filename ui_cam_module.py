@@ -62,8 +62,10 @@ class CameraModule(QtCore.QObject):
         self._log_func = log_func
         self._cfg = load_cfg()
         self.hevc_guard_ms = int(self._cfg.get("hevc_guard_ms", 4000))
-        self.prefer_h264 = bool(self._cfg.get("prefer_h264", False))
-        self.suppress_stderr = bool(self._cfg.get("suppress_stderr", False))
+        self.prefer_h264 = bool(self._cfg.get("prefer_h264", True))
+        self.suppress_stderr = bool(
+            self._cfg.get("silence_native_stderr", self._cfg.get("suppress_stderr", False))
+        )
         self._root = self._build_ui()
         self._hevc_guard_tried = False
         self._last_codec = ""
@@ -950,12 +952,13 @@ class CameraModule(QtCore.QObject):
             "ffprobe_path": self.ffprobe_path.text().strip(),
             "hevc_guard_ms": self.hevc_guard.value(),
             "prefer_h264": self.prefer_h264,
-            "suppress_stderr": self.suppress_stderr_chk.isChecked(),
+            "silence_native_stderr": self.suppress_stderr_chk.isChecked(),
             "ptz_cgi_port": self.ptz_cgi_port.value(),
             "ptz_cgi_channel": self.ptz_cgi_channel.value(),
             "ptz_cgi_poll_hz": self.ptz_cgi_poll.value(),
             "ptz_cgi_https": self.ptz_cgi_https.isChecked(),
         })
+        self._cfg.pop("suppress_stderr", None)
         save_cfg(self._cfg)
         self.hevc_guard_ms = self.hevc_guard.value()
         self.prefer_h264 = self.prefer_h264_chk.isChecked()

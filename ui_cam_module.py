@@ -1252,5 +1252,6 @@ class CameraModule(QtCore.QObject):
         app_state.current_camera = ctx
         try:
             bus.signal_camera_changed.emit(ctx)
+            shared_state.signal_camera_changed.emit(ctx)
         except Exception:
             pass

@@ -7,6 +7,7 @@ import sys
 from PySide6 import QtCore, QtGui, QtWidgets
 import vlc
 
+from ui_settings_module import SettingsModule
 from ui_cam_module import CameraModule
 from ui_prep_module import PrepModule
 from ui_img2ground_module import Img2GroundModule
@@ -52,6 +53,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Register modules
         self._modules = []
+
+        settings = SettingsModule(log_func=self.log)
+        self._modules.append(settings)
+        self.tabs.addTab(settings.widget(), settings.title)
+
         cam = CameraModule(self.vlc_instance, log_func=self.log)
         self._modules.append(cam)
         self.tabs.addTab(cam.widget(), cam.title)

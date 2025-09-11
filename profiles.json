@@ -12,6 +12,10 @@
     "ptz_cgi_port": 80,
     "ptz_cgi_channel": 1,
     "ptz_cgi_poll_hz": 5.0,
-    "ptz_cgi_https": false
+    "ptz_cgi_https": false,
+    "calibration_images": "",
+    "calibration_params": "",
+    "lights_file": "",
+    "dtm_file": ""
   }
 ]

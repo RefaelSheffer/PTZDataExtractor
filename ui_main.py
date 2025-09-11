@@ -10,6 +10,8 @@ import vlc
 from ui_cam_module import CameraModule
 from ui_prep_module import PrepModule
 from ui_img2ground_module import Img2GroundModule
+from ui_settings_module import SettingsModule
+from ui_user_module import UserModule
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -59,6 +61,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # Register modules
         self._modules = []
 
+        settings = SettingsModule(log_func=self.log)
+        self._modules.append(settings)
+        self.settings_tabs.addTab(settings.widget(), settings.title)
+
         cam = CameraModule(self.vlc_instance, log_func=self.log)
         self._modules.append(cam)
         self.settings_tabs.addTab(cam.widget(), cam.title)
@@ -70,6 +76,10 @@ class MainWindow(QtWidgets.QMainWindow):
         i2g = Img2GroundModule(self.vlc_instance, log_func=self.log)
         self._modules.append(i2g)
         self.settings_tabs.addTab(i2g.widget(), i2g.title)
+
+        user = UserModule(self.vlc_instance, log_func=self.log)
+        self._modules.append(user)
+        self.tabs.insertTab(0, user.widget(), user.title)
 
     # ------- global logging -------
     @QtCore.Slot(str)

@@ -16,7 +16,7 @@ PROFILES_PATH = APP_DIR / "profiles.json"
 
 class SettingsModule(QtCore.QObject):
     """Plug-in style module to edit camera profiles"""
-    title = "Settings"
+    title = "Profiles"
     icon: Optional[QtGui.QIcon] = None
 
     def __init__(self, log_func: Callable[[str], None] = print):

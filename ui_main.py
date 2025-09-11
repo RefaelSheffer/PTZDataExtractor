@@ -10,7 +10,6 @@ import vlc
 from ui_cam_module import CameraModule
 from ui_prep_module import PrepModule
 from ui_img2ground_module import Img2GroundModule
-from ui_settings_module import SettingsModule
 from ui_user_module import UserModule
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -60,10 +59,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Register modules
         self._modules = []
-
-        settings = SettingsModule(log_func=self.log)
-        self._modules.append(settings)
-        self.settings_tabs.addTab(settings.widget(), settings.title)
 
         cam = CameraModule(self.vlc_instance, log_func=self.log)
         self._modules.append(cam)

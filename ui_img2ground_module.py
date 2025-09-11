@@ -428,6 +428,10 @@ class Img2GroundModule(QtCore.QObject):
         self._ptz_timer = QtCore.QTimer(self._root); self._ptz_timer.timeout.connect(self._poll_ptz_ui); self._ptz_timer.start(400)
         shared_state.signal_camera_changed.connect(self._on_active_camera_changed)
         shared_state.signal_stream_mode_changed.connect(self._on_stream_mode_changed)
+        shared_state.signal_camera_changed.connect(
+            lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None))
+        )
+        shared_state.signal_layers_changed.connect(self._on_layers_changed)
         if app_state.current_camera:
             self.use_active_camera(force=True)
         self._on_stream_mode_changed(getattr(app_state, "stream_mode", "online"))
@@ -772,11 +776,12 @@ class Img2GroundModule(QtCore.QObject):
         if path and Path(path).exists():
             self._load_orthophoto(path)
 
-    def _load_orthophoto(self, path: Optional[str] = None):
+    def _load_orthophoto(self, path: Optional[str] = None, *, broadcast: bool = True):
         if not path:
             path, _ = QtWidgets.QFileDialog.getOpenFileName(None, "Open Orthophoto (GeoTIFF)", "",
                                                             "GeoTIFF (*.tif *.tiff);;All files (*.*)")
-            if not path: return
+            if not path:
+                return
         try:
             self._ortho_layer = RasterLayer(path, max_size=2048)
             img = numpy_to_qimage(self._ortho_layer.downsampled_image())
@@ -786,8 +791,58 @@ class Img2GroundModule(QtCore.QObject):
             self._map.setSceneRect(self._ortho_pix.boundingRect()); self._map.fit()
             self._log(f"Orthophoto loaded (EPSG={self._ortho_layer.ds.crs.to_epsg()})")
             self._remove_last_pick(); self._remove_video_frame_outline(); self._remove_fov_wedge()
+            if broadcast:
+                self._update_shared_layers()
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
+
+    def _update_shared_layers(self) -> None:
+        alias = getattr(app_state.current_camera, "alias", "default")
+        ortho = getattr(self._ortho_layer, "path", None)
+        dtm = getattr(self, "_dtm_path", None)
+        layers = {"ortho": ortho, "dtm": dtm, "srs": None}
+        if app_state.current_camera:
+            app_state.current_camera.layers = layers
+        shared_state.layers_for_camera[alias] = layers
+        shared_state.signal_layers_changed.emit(alias, layers)
+
+    def _on_layers_changed(self, alias: str, layers: dict) -> None:
+        if alias == getattr(app_state.current_camera, "alias", None):
+            self._apply_layers(layers)
+
+    def _apply_layers_for(self, alias: str | None) -> None:
+        if not alias:
+            return
+        layers = shared_state.layers_for_camera.get(alias)
+        if layers:
+            self._apply_layers(layers)
+
+    def _apply_layers(self, layers: dict) -> None:
+        ortho = self._resolve_path(layers.get("ortho"))
+        dtm = self._resolve_path(layers.get("dtm"))
+        if ortho:
+            self._load_orthophoto(ortho, broadcast=False)
+        if dtm:
+            try:
+                if self._dtm is not None:
+                    self._dtm.close()
+                self._dtm = DTM(dtm)
+                self._dtm_path = dtm
+            except Exception:
+                pass
+
+    def _resolve_path(self, p: str | None) -> str | None:
+        if not p:
+            return None
+        from pathlib import Path
+        pp = Path(p)
+        if pp.exists():
+            return str(pp)
+        proj = getattr(app_state, "project", None)
+        root = getattr(proj, "root_dir", None) if proj else None
+        if root and (Path(root) / pp).exists():
+            return str((Path(root) / pp).resolve())
+        return str(pp)
 
     # ----- Bundles -----
     def _refresh_bundles(self):
@@ -813,9 +868,12 @@ class Img2GroundModule(QtCore.QObject):
                 model_path = self._bundle.get("model_path") or self._bundle.get("terrain_path")
             if not model_path or not Path(model_path).exists():
                 QtWidgets.QMessageBox.warning(None, "Bundle", f"DTM path not found:\n{model_path}"); return
-            if self._dtm is not None: self._dtm.close()
+            if self._dtm is not None:
+                self._dtm.close()
             self._dtm = DTM(model_path)
+            self._dtm_path = model_path
             self.lbl_bundle.setText(f"Loaded: {name}"); self._log(f"Bundle loaded: {name}")
+            self._update_shared_layers()
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Bundle", f"Failed to load bundle: {e}")
 

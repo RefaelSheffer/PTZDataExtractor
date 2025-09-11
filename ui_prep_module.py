@@ -9,6 +9,7 @@ import vlc
 
 from camera_models import save_bundle, list_bundles
 from geom3d import CameraIntrinsics, CameraPose, GeoRef, geographic_to_local
+from app_state import app_state
 import shared_state
 
 
@@ -25,6 +26,11 @@ class PrepModule(QtCore.QObject):
         self._dtm_pixmap = None
         self._ortho_pixmap = None
         self._root = self._build_ui()
+
+        shared_state.signal_camera_changed.connect(
+            lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None))
+        )
+        shared_state.signal_layers_changed.connect(self._on_layers_changed)
 
     def widget(self) -> QtWidgets.QWidget:
         return self._root
@@ -157,6 +163,7 @@ class PrepModule(QtCore.QObject):
         self.ed_dtm.setText(path)
         shared_state.dtm_path = path
         self._ensure_base_map()
+        self._update_shared_layers()
 
     def _read_epsg_from_dtm(self):
         try:
@@ -235,7 +242,7 @@ class PrepModule(QtCore.QObject):
                 self._log(f"Failed to load base DTM map: {e}")
         self._update_layer_visibility()
 
-    def _load_orthophoto(self):
+    def _load_orthophoto(self, *, broadcast: bool = True):
         try:
             from raster_layer import RasterLayer
             from ui_map_tools import numpy_to_qimage
@@ -258,6 +265,8 @@ class PrepModule(QtCore.QObject):
             shared_state.orthophoto_path = path
             self._update_layer_visibility()
             self._log(f"Orthophoto loaded (EPSG={self._ortho_layer.ds.crs.to_epsg()})")
+            if broadcast:
+                self._update_shared_layers()
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 
@@ -380,7 +389,7 @@ class PrepModule(QtCore.QObject):
         if ortho_path:
             self._load_orthophoto_path(ortho_path)
 
-    def _load_orthophoto_path(self, path: str):
+    def _load_orthophoto_path(self, path: str, *, broadcast: bool = True):
         try:
             from raster_layer import RasterLayer
             from ui_map_tools import numpy_to_qimage
@@ -401,5 +410,59 @@ class PrepModule(QtCore.QObject):
             shared_state.orthophoto_path = path
             self._update_layer_visibility()
             self._log(f"Orthophoto loaded (EPSG={self._ortho_layer.ds.crs.to_epsg()})")
+            if broadcast:
+                self._update_shared_layers()
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
+
+    def _update_shared_layers(self) -> None:
+        alias = getattr(app_state.current_camera, "alias", "default")
+        dtm = self.ed_dtm.text().strip() or None
+        srs = None
+        try:
+            if self._map_layer and self._map_layer.ds.crs:
+                epsg = self._map_layer.ds.crs.to_epsg()
+                if epsg:
+                    srs = f"EPSG:{epsg}"
+        except Exception:
+            pass
+        layers = {"ortho": shared_state.orthophoto_path, "dtm": dtm, "srs": srs}
+        if app_state.current_camera:
+            app_state.current_camera.layers = layers
+        shared_state.layers_for_camera[alias] = layers
+        shared_state.signal_layers_changed.emit(alias, layers)
+
+    def _on_layers_changed(self, alias: str, layers: dict) -> None:
+        if alias == getattr(app_state.current_camera, "alias", None):
+            self._apply_layers(layers)
+
+    def _apply_layers_for(self, alias: str | None) -> None:
+        if not alias:
+            return
+        layers = shared_state.layers_for_camera.get(alias)
+        if layers:
+            self._apply_layers(layers)
+
+    def _apply_layers(self, layers: dict) -> None:
+        dtm = self._resolve_path(layers.get("dtm"))
+        ortho = self._resolve_path(layers.get("ortho"))
+        if dtm:
+            self.ed_dtm.setText(dtm)
+            shared_state.dtm_path = dtm
+            self._map_layer = None
+            self._ensure_base_map()
+        if ortho:
+            self._load_orthophoto_path(ortho, broadcast=False)
+
+    def _resolve_path(self, p: str | None) -> str | None:
+        if not p:
+            return None
+        from pathlib import Path
+        pp = Path(p)
+        if pp.exists():
+            return str(pp)
+        proj = getattr(app_state, "project", None)
+        root = getattr(proj, "root_dir", None) if proj else None
+        if root and (Path(root) / pp).exists():
+            return str((Path(root) / pp).resolve())
+        return str(pp)

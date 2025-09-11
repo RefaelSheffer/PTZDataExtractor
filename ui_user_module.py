@@ -92,6 +92,10 @@ class UserTab(QtWidgets.QWidget):
         btn_load.clicked.connect(self.on_load_layers)
 
         bus.signal_camera_changed.connect(self._on_active_camera_changed)
+        shared_state.signal_camera_changed.connect(
+            lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None))
+        )
+        shared_state.signal_layers_changed.connect(self._on_layers_changed)
         self.mount_video_preview()
         if app_state.current_camera:
             self._on_active_camera_changed(app_state.current_camera)
@@ -143,7 +147,7 @@ class UserTab(QtWidgets.QWidget):
 
     # ------------------------------------------------------------------
     # Layers
-    def on_load_layers(self) -> None:
+    def on_load_layers(self, *, broadcast: bool = True) -> None:
         dtm = self.dtm_edit.text().strip()
         ortho = self.ortho_edit.text().strip()
         shared_state.dtm_path = dtm or None
@@ -163,6 +167,8 @@ class UserTab(QtWidgets.QWidget):
             if dtm:
                 self._dtm_path = dtm
             self._toast("Layers loaded")
+            if broadcast:
+                self._update_shared_layers()
         except Exception as e:  # pragma: no cover - UI feedback
             self._toast(f"Layer load failed: {e}", error=True)
 
@@ -174,10 +180,51 @@ class UserTab(QtWidgets.QWidget):
         if layers:
             self.dtm_edit.setText(layers.get("dtm", ""))
             self.ortho_edit.setText(layers.get("ortho", ""))
-            self.on_load_layers()
+            self.on_load_layers(broadcast=False)
         calib = getattr(ctx, "calibration", None)
         if calib:
             self._fill_calibration_ui(calib)
+
+    def _update_shared_layers(self) -> None:
+        alias = getattr(app_state.current_camera, "alias", "default")
+        layers = {"dtm": self.dtm_edit.text().strip() or None,
+                  "ortho": self.ortho_edit.text().strip() or None,
+                  "srs": None}
+        if app_state.current_camera:
+            app_state.current_camera.layers = layers
+        shared_state.layers_for_camera[alias] = layers
+        shared_state.signal_layers_changed.emit(alias, layers)
+
+    def _on_layers_changed(self, alias: str, layers: dict) -> None:
+        if alias == getattr(app_state.current_camera, "alias", None):
+            self._apply_layers(layers)
+
+    def _apply_layers_for(self, alias: str | None) -> None:
+        if not alias:
+            return
+        layers = shared_state.layers_for_camera.get(alias)
+        if layers:
+            self._apply_layers(layers)
+
+    def _apply_layers(self, layers: dict) -> None:
+        dtm = self._resolve_path(layers.get("dtm"))
+        ortho = self._resolve_path(layers.get("ortho"))
+        self.dtm_edit.setText(dtm or "")
+        self.ortho_edit.setText(ortho or "")
+        self.on_load_layers(broadcast=False)
+
+    def _resolve_path(self, p: str | None) -> str | None:
+        if not p:
+            return None
+        from pathlib import Path
+        pp = Path(p)
+        if pp.exists():
+            return str(pp)
+        proj = getattr(app_state, "project", None)
+        root = getattr(proj, "root_dir", None) if proj else None
+        if root and (Path(root) / pp).exists():
+            return str((Path(root) / pp).resolve())
+        return str(pp)
 
     def _fill_calibration_ui(self, calib: dict) -> None:
         parts = []

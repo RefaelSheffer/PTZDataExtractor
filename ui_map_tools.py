@@ -37,18 +37,45 @@ class MapView(QtWidgets.QGraphicsView):
             | QtGui.QPainter.SmoothPixmapTransform
             | QtGui.QPainter.TextAntialiasing
         )
-        self.setDragMode(QtWidgets.QGraphicsView.ScrollHandDrag)
+        self.setDragMode(QtWidgets.QGraphicsView.NoDrag)
+        self.setTransformationAnchor(QtWidgets.QGraphicsView.AnchorUnderMouse)
         self._marker_cam = None       # QGraphicsItemGroup
         self._temp_items = []         # calibration-only
+        self._panning = False
+        self._pan_start = QtCore.QPoint()
 
     # אינטראקציה
     def mousePressEvent(self, e: QtGui.QMouseEvent):
+        if e.button() == QtCore.Qt.MiddleButton:
+            self._panning = True
+            self._pan_start = e.pos()
+            self.setCursor(QtCore.Qt.ClosedHandCursor)
+            e.accept()
+            return
         if e.button() == QtCore.Qt.LeftButton and self.scene() is not None:
             p = self.mapToScene(e.position().toPoint())
             self.clicked.emit(p.x(), p.y())
             e.accept()
             return
         super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e: QtGui.QMouseEvent):
+        if self._panning:
+            delta = e.pos() - self._pan_start
+            self._pan_start = e.pos()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            e.accept()
+            return
+        super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e: QtGui.QMouseEvent):
+        if e.button() == QtCore.Qt.MiddleButton and self._panning:
+            self._panning = False
+            self.setCursor(QtCore.Qt.ArrowCursor)
+            e.accept()
+            return
+        super().mouseReleaseEvent(e)
 
     def wheelEvent(self, e: QtGui.QWheelEvent):
         if e.angleDelta().y() == 0:

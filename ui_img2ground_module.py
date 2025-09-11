@@ -401,6 +401,7 @@ class Img2GroundModule(QtCore.QObject):
         # PTZ
         self._ptz: Optional[PTZClient] = None
         self._ptz_last: PTZReading = PTZReading()
+        self._ptz_meta: Optional[Any] = None
         self._yaw_offset_deg: Optional[float] = None
         self._hfov_deg: Optional[float] = None
         self._fx_from_hfov: Optional[float] = None
@@ -495,6 +496,7 @@ class Img2GroundModule(QtCore.QObject):
         self.btn_az_from_ortho = QtWidgets.QPushButton("Azimuth from ortho…")
         self.btn_az_from_ortho.setToolTip("בחר נקודה/ות באורתו שהמצלמה מביטה אליהן. ההיסט אזימוט יחושב מול ה-pan החי.")
         self.btn_az_from_ortho.clicked.connect(self._calibrate_azimuth_from_ortho)
+        self.btn_az_from_ortho.setEnabled(self._get_pan_now() is not None)
         gls.addWidget(self.btn_level_horizon); gls.addWidget(self.btn_az_from_ortho)
         g.addWidget(grp_simple, r, 0, 1, 8); r += 1
 
@@ -676,6 +678,28 @@ class Img2GroundModule(QtCore.QObject):
             self._set_media(ctx.rtsp_url, is_file=False, ctx=ctx)
             self._log("IG: playing from active camera")
 
+        meta = getattr(app_state, "ptz_meta", None)
+        if meta is None:
+            meta = getattr(shared_state, "ptz_meta", None)
+        if meta:
+            try:
+                self._ptz_meta = meta
+                if hasattr(meta, "last"):
+                    self._ptz_last = meta.last()
+            except Exception:
+                pass
+
+        if not getattr(self, "_ptz_meta", None) and ctx and getattr(ctx, "host", None):
+            self.ed_host.setText(ctx.host or "")
+            self.ed_user.setText(getattr(ctx, "user", "") or "")
+            self.ed_pwd.setText(getattr(ctx, "pwd", "") or "")
+            try:
+                self._connect_ptz()
+            except Exception as e:
+                self._log(f"Auto PTZ connect failed: {e}")
+
+        self.btn_az_from_ortho.setEnabled(self._get_pan_now() is not None)
+
     def _on_stream_mode_changed(self, mode: str) -> None:
         ctx = app_state.current_camera
         if ctx and self.chk_use_active.isChecked():
@@ -856,6 +880,34 @@ class Img2GroundModule(QtCore.QObject):
             # אל תקרוס בגלל None – תציג placeholder
             self.lbl_ptz.setText("Pan=?, Tilt=?, Zoom=?, F(mm)=?")
 
+        self.btn_az_from_ortho.setEnabled(self._get_pan_now() is not None)
+
+    def _get_pan_now(self):
+        # 1) local
+        if getattr(self, "_ptz_last", None) and self._ptz_last.pan_deg is not None:
+            return float(self._ptz_last.pan_deg)
+        # 2) global (meta from Cameras tab)
+        meta = getattr(app_state, "ptz_meta", None)
+        if meta is None:
+            meta = getattr(shared_state, "ptz_meta", None)
+        try:
+            if hasattr(meta, "last"):
+                last = meta.last()
+            elif isinstance(meta, dict):
+                last = meta
+            else:
+                last = None
+            pan = getattr(last, "pan_deg", None) if last else None
+            if pan is not None:
+                return float(pan)
+        except Exception:
+            pass
+        # 3) active context (if stored)
+        ctx = getattr(app_state, "current_camera", None)
+        if ctx and getattr(ctx, "pan_deg", None) is not None:
+            return float(ctx.pan_deg)
+        return None
+
     # ----- FOV calib via PTZ -----
     def _calibrate_fov_with_ptz(self):
         """Calibrate yaw offset and FOV using PTZ telemetry.
@@ -972,7 +1024,8 @@ class Img2GroundModule(QtCore.QObject):
     def _calibrate_azimuth_from_ortho(self):
         if self._ortho_layer is None:
             QtWidgets.QMessageBox.information(None, "Azimuth from ortho", "Load an orthophoto first."); return
-        if self._ptz_last.pan_deg is None:
+        pan_now = self._get_pan_now()
+        if pan_now is None:
             QtWidgets.QMessageBox.information(None, "Azimuth from ortho", "PTZ not connected (no pan)."); return
         cam_proj = getattr(shared_state, "camera_proj", None)
         if not cam_proj:
@@ -995,7 +1048,6 @@ class Img2GroundModule(QtCore.QObject):
         s = sum(math.sin(math.radians(a)) for a in yaws)
         c = sum(math.cos(math.radians(a)) for a in yaws)
         yaw_avg = math.degrees(math.atan2(s, c))
-        pan_now = self._ptz_last.pan_deg or 0.0
         self._yaw_offset_deg = _normalize_angle_deg(yaw_avg - pan_now)
         ctx = getattr(app_state, "current_camera", None)
         if ctx is not None:

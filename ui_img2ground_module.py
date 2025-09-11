@@ -907,9 +907,15 @@ class Img2GroundModule(QtCore.QObject):
 
     # ----- simple calibration helpers -----
     def _calibrate_from_horizon(self):
-        pm = self.video.grab()
-        if pm.isNull():
-            QtWidgets.QMessageBox.information(None, "Level from horizon", "Failed to capture frame."); return
+        # חייבים וידאו מנוגן; אחרת ה-snapshot יחזור שחור
+        try:
+            if not self._player or not self._player.is_playing():
+                QtWidgets.QMessageBox.information(None, "Level from horizon", "Start the video first."); return
+        except Exception:
+            pass
+        pm = self._grab_snapshot_pixmap()
+        if pm is None or pm.isNull():
+            QtWidgets.QMessageBox.information(None, "Level from horizon", "Snapshot failed."); return
         img = pm.toImage()
         dlg = HorizonDialog(img, self._root)
         if dlg.exec() != QtWidgets.QDialog.Accepted:
@@ -930,9 +936,38 @@ class Img2GroundModule(QtCore.QObject):
         if ctx is not None:
             setattr(ctx, "roll_offset_deg", getattr(ctx, "roll_offset_deg", 0.0) - roll)
             setattr(ctx, "pitch_offset_deg", getattr(ctx, "pitch_offset_deg", 0.0) + pitch)
+            # (אופציונלי) שמירת מטריקות מה-PTZ של אותו רגע
+            last = getattr(self, "_ptz_last", None)
+            if last:
+                setattr(ctx, "tilt_at_level_deg", getattr(last, "tilt_deg", None))
+                setattr(ctx, "zoom_at_level", getattr(last, "zoom", None))
         self.lbl_status.setText(f"Level applied: roll_offset={-roll:.2f}°, pitch≈{pitch:.2f}°")
         QtWidgets.QMessageBox.information(None, "Level from horizon",
             f"Applied offsets:\nRoll: {-roll:.2f}°\nPitch≈ {pitch:.2f}°")
+
+    def _grab_snapshot_pixmap(self) -> QtGui.QPixmap | None:
+        # לוקח snapshot דרך VLC לקובץ זמני ואז טוען ל-Pixmap (הדרך היציבה ב-Windows)
+        try:
+            from pathlib import Path
+            import time, tempfile
+            tmp = Path(tempfile.gettempdir()) / f"ig_snap_{int(time.time()*1000)}.png"
+            try:
+                self._player.video_take_snapshot(0, str(tmp), 0, 0)
+            except Exception:
+                return None
+            # חכה קצת לכתיבה לדיסק
+            for _ in range(6):
+                if tmp.exists() and tmp.stat().st_size > 0:
+                    pm = QtGui.QPixmap(str(tmp))
+                    try:
+                        tmp.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    return pm if not pm.isNull() else None
+                QtCore.QThread.msleep(120)
+        except Exception:
+            pass
+        return None
 
     def _calibrate_azimuth_from_ortho(self):
         if self._ortho_layer is None:

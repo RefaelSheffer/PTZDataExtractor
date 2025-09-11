@@ -29,6 +29,7 @@ from app_state import app_state
 
 from any_ptz_client import AnyPTZClient
 from onvif_ptz import PTZReading
+from calibration_utils import roll_error_from_horizon
 
 APP_DIR = Path(__file__).resolve().parent
 APP_CFG = APP_DIR / "app_config.json"
@@ -476,11 +477,26 @@ class Img2GroundModule(QtCore.QObject):
         self.btn_load_ortho = QtWidgets.QPushButton("Load Orthophoto…"); self.btn_load_ortho.clicked.connect(self._load_orthophoto)
         self.btn_use_shared = QtWidgets.QPushButton("Use Orthophoto from Preparation"); self.btn_use_shared.clicked.connect(self._try_load_shared_ortho)
         self.btn_reset = QtWidgets.QPushButton("Reset calibration"); self.btn_reset.clicked.connect(self._reset_calibration)
-        self.btn_homo_cal = QtWidgets.QPushButton("Homography calibration…"); self.btn_homo_cal.clicked.connect(self._run_homography_dialog)
-        self.btn_calib_tools = QtWidgets.QPushButton("Calib tools…"); self.btn_calib_tools.clicked.connect(self._open_calib_tools)
-        rowm.addWidget(self.btn_load_ortho); rowm.addWidget(self.btn_use_shared); rowm.addWidget(self.btn_homo_cal); rowm.addWidget(self.btn_calib_tools)
+        self.btn_advanced = QtWidgets.QToolButton(); self.btn_advanced.setText("Advanced ▾")
+        menu_adv = QtWidgets.QMenu(self.btn_advanced)
+        act_homo = menu_adv.addAction("Homography calibration…"); act_homo.triggered.connect(self._run_homography_dialog)
+        act_manual = menu_adv.addAction("Manual calibration dialog…"); act_manual.triggered.connect(self._open_calib_tools)
+        self.btn_advanced.setMenu(menu_adv); self.btn_advanced.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        rowm.addWidget(self.btn_load_ortho); rowm.addWidget(self.btn_use_shared); rowm.addWidget(self.btn_advanced)
         rowm.addStretch(1); rowm.addWidget(self.btn_reset)
         g.addLayout(rowm, r, 0, 1, 8); r += 1
+
+        # simple calibration group
+        grp_simple = QtWidgets.QGroupBox("Calibration (Simple)")
+        gls = QtWidgets.QHBoxLayout(grp_simple)
+        self.btn_level_horizon = QtWidgets.QPushButton("Level from Horizon…")
+        self.btn_level_horizon.setToolTip("לחץ 2 נק’ על קו האופק בתמונה כדי לאפס roll/pitch.")
+        self.btn_level_horizon.clicked.connect(self._calibrate_from_horizon)
+        self.btn_az_from_map = QtWidgets.QPushButton("Azimuth from Map…")
+        self.btn_az_from_map.setToolTip("בחר נקודה/ות באורתו שהמצלמה מביטה אליהן. ההיסט אזימוט יחושב מול ה-pan החי.")
+        self.btn_az_from_map.clicked.connect(self._calibrate_azimuth_from_map)
+        gls.addWidget(self.btn_level_horizon); gls.addWidget(self.btn_az_from_map)
+        g.addWidget(grp_simple, r, 0, 1, 8); r += 1
 
         # camera model / calibration
         self.chk_use_active = QtWidgets.QCheckBox("Use active camera (from RTSP tab)")
@@ -555,7 +571,8 @@ class Img2GroundModule(QtCore.QObject):
         rowp = QtWidgets.QHBoxLayout()
         self.cmb_mapping = QtWidgets.QComboBox()
         self.cmb_mapping.addItems(["Auto (prefer Homography)", "Homography only", "PTZ+DTM only"])
-        self.btn_pick_now = QtWidgets.QPushButton("Pick now (snapshot)"); self.btn_pick_now.clicked.connect(self._pick_now_snapshot)
+        self.btn_pick_now = QtWidgets.QPushButton("Pick now"); self.btn_pick_now.clicked.connect(self._pick_now_snapshot)
+        self.btn_pick_now.setToolTip("לכידת פריים ותרגום לנ״צ/‏XY; נשלח גם ל-QR.")
         rowp.addWidget(QtWidgets.QLabel("Mapping mode:")); rowp.addWidget(self.cmb_mapping)
         rowp.addStretch(1); rowp.addWidget(self.btn_pick_now)
         g.addLayout(rowp, r, 0, 1, 8); r += 1
@@ -887,6 +904,72 @@ class Img2GroundModule(QtCore.QObject):
         self.lbl_status.setText(f"FOV calibrated: center={yaw_center_world:.2f}°, hfov={hfov:.2f}°, offset={self._yaw_offset_deg:.2f}°")
         self._draw_fov_wedge(Xc, Yc, yaw_l, yaw_r)
         self._remove_video_frame_outline()
+
+    # ----- simple calibration helpers -----
+    def _calibrate_from_horizon(self):
+        if self._bundle is None:
+            QtWidgets.QMessageBox.information(None, "Horizon", "Load a bundle first."); return
+        pm = self.video.grab()
+        if pm.isNull():
+            QtWidgets.QMessageBox.information(None, "Horizon", "Failed to capture frame."); return
+        img = pm.toImage()
+        dlg = HorizonDialog(img, self._root)
+        if dlg.exec() != QtWidgets.QDialog.Accepted:
+            return
+        pts = dlg.result_points()
+        if not pts:
+            return
+        (x1, y1), (x2, y2) = pts
+        width = abs(x2 - x1)
+        if width < 1e-6:
+            QtWidgets.QMessageBox.information(None, "Horizon", "Points too close."); return
+        roll = roll_error_from_horizon(y1, y2, width)
+        y_hor = 0.5 * (y1 + y2)
+        fy = self.fy.value() or 1.0
+        cy = self.cy.value()
+        pitch = math.degrees(math.atan((cy - y_hor) / fy))
+        pose_d = self._bundle.setdefault("pose", {})
+        cur_roll = pose_d.get("roll_deg", pose_d.get("roll", 0.0))
+        pose_d["roll_deg"] = cur_roll - roll
+        pose_d["pitch_deg"] = pitch
+        self.lbl_status.setText(f"Level applied: roll={pose_d['roll_deg']:.2f}°, pitch={pitch:.2f}°")
+
+    def _calibrate_azimuth_from_map(self):
+        if self._ortho_layer is None:
+            QtWidgets.QMessageBox.information(None, "Azimuth", "Load an orthophoto first."); return
+        if self._ptz_last.pan_deg is None:
+            QtWidgets.QMessageBox.information(None, "Azimuth", "PTZ not connected (no pan)."); return
+        cam_proj = getattr(shared_state, "camera_proj", None)
+        if not cam_proj:
+            QtWidgets.QMessageBox.information(None, "Azimuth", "Camera position not set in Preparation."); return
+        dlg = PointsDialog(self._map, self._root)
+        if dlg.exec() != QtWidgets.QDialog.Accepted:
+            return
+        pts = dlg.result_points()
+        if not pts:
+            return
+        Xc, Yc = float(cam_proj["x"]), float(cam_proj["y"])
+        yaws = []
+        try:
+            for xs, ys in pts:
+                X, Y = self._ortho_layer.scene_to_geo(xs, ys)
+                dx = X - Xc; dy = Y - Yc
+                yaws.append(_normalize_angle_deg(math.degrees(math.atan2(dx, dy))))
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(None, "Azimuth", f"scene_to_geo failed: {e}"); return
+        s = sum(math.sin(math.radians(a)) for a in yaws)
+        c = sum(math.cos(math.radians(a)) for a in yaws)
+        yaw_avg = math.degrees(math.atan2(s, c))
+        pan_now = self._ptz_last.pan_deg or 0.0
+        self._yaw_offset_deg = _normalize_angle_deg(yaw_avg - pan_now)
+        self.lbl_status.setText(f"Azimuth offset={self._yaw_offset_deg:.2f}° (avg yaw {yaw_avg:.2f}°)")
+        pose_d = self._bundle.get("pose") if self._bundle else None
+        georef = GeoRef.from_dict(self._bundle["georef"]) if self._bundle else None
+        if pose_d and georef:
+            o = np.array([pose_d.get("x", 0.0), pose_d.get("y", 0.0), pose_d.get("z", 0.0)])
+            yaw_rad = math.radians(yaw_avg)
+            d = np.array([math.sin(yaw_rad), math.cos(yaw_rad), 0.0])
+            self._draw_azimuth_line(o, d, georef)
 
     # ----- FOV wedge drawing -----
     def _remove_fov_wedge(self):
@@ -1227,6 +1310,114 @@ class Img2GroundModule(QtCore.QObject):
         except Exception: fps = 0.0
         st = p.get_state()
         self.lbl_metrics.setText(f"State: {st} | {w}x{h} | FPS:{fps:.1f}")
+
+
+# ----- small dialogs -----
+class HorizonDialog(QtWidgets.QDialog):
+    def __init__(self, snapshot_img: QtGui.QImage, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pick horizon points")
+        self.setModal(True)
+        v = QtWidgets.QVBoxLayout(self)
+        v.addWidget(QtWidgets.QLabel("Click two points on the horizon."))
+        self._view = _GraphicsClickView()
+        sc = QtWidgets.QGraphicsScene(self._view)
+        self._pix = QtGui.QPixmap.fromImage(snapshot_img)
+        sc.addPixmap(self._pix)
+        sc.setSceneRect(0, 0, self._pix.width(), self._pix.height())
+        self._view.setScene(sc)
+        self._view.setRenderHints(QtGui.QPainter.Antialiasing | QtGui.QPainter.SmoothPixmapTransform)
+        self._view.clicked.connect(self._on_click)
+        v.addWidget(self._view, 1)
+        info = QtWidgets.QHBoxLayout()
+        self.lbl = QtWidgets.QLabel("Picked: 0/2")
+        self.btn_clear = QtWidgets.QPushButton("Clear"); self.btn_clear.clicked.connect(self._clear)
+        info.addWidget(self.lbl); info.addStretch(1); info.addWidget(self.btn_clear)
+        v.addLayout(info)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        self._ok = bb.button(QtWidgets.QDialogButtonBox.Ok); self._ok.setEnabled(False)
+        v.addWidget(bb)
+        bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
+        self._xs: List[float] = []; self._ys: List[float] = []
+        self._tmp: List[QtWidgets.QGraphicsEllipseItem] = []
+
+    def _on_click(self, x: float, y: float):
+        if len(self._xs) >= 2: return
+        sc = self._view.scene()
+        it = sc.addEllipse(-4, -4, 8, 8, QtGui.QPen(QtGui.QColor(0, 255, 0), 2),
+                            QtGui.QBrush(QtGui.QColor(0, 255, 0, 120)))
+        it.setZValue(50); it.setPos(x, y)
+        self._tmp.append(it)
+        self._xs.append(x); self._ys.append(y)
+        self.lbl.setText(f"Picked: {len(self._xs)}/2"); self._ok.setEnabled(len(self._xs)==2)
+
+    def _clear(self):
+        self._xs.clear(); self._ys.clear()
+        for it in self._tmp:
+            try: it.scene().removeItem(it)
+            except Exception: pass
+        self._tmp.clear()
+        self.lbl.setText("Picked: 0/2"); self._ok.setEnabled(False)
+
+    def result_points(self) -> Optional[Tuple[Tuple[float,float], Tuple[float,float]]]:
+        if len(self._xs) != 2: return None
+        return ((self._xs[0], self._ys[0]), (self._xs[1], self._ys[1]))
+
+
+class PointsDialog(QtWidgets.QDialog):
+    def __init__(self, map_view: MapView, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pick point(s) on orthophoto")
+        self.setModal(True)
+        self.setMinimumSize(400, 160)
+        v = QtWidgets.QVBoxLayout(self)
+        v.addWidget(QtWidgets.QLabel("Click one or more points on the orthophoto."))
+        info = QtWidgets.QHBoxLayout()
+        self.lbl = QtWidgets.QLabel("Picked: 0")
+        self.btn_clear = QtWidgets.QPushButton("Clear"); self.btn_clear.clicked.connect(self._clear)
+        info.addWidget(self.lbl); info.addStretch(1); info.addWidget(self.btn_clear)
+        v.addLayout(info)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        self._ok = bb.button(QtWidgets.QDialogButtonBox.Ok); self._ok.setEnabled(False)
+        v.addWidget(bb)
+        bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
+        self._map = map_view
+        self._xs: List[float] = []; self._ys: List[float] = []
+        self._tmp_items: List[QtWidgets.QGraphicsEllipseItem] = []
+        self._conn = self._map.clicked.connect(self._on_map_click)
+
+    def _on_map_click(self, xs: float, ys: float):
+        self._xs.append(xs); self._ys.append(ys)
+        sc = self._map.scene()
+        it = sc.addEllipse(-4, -4, 8, 8, QtGui.QPen(QtGui.QColor(255, 180, 0), 2),
+                           QtGui.QBrush(QtGui.QColor(255, 180, 0, 180)))
+        it.setZValue(80); it.setPos(xs, ys)
+        self._tmp_items.append(it)
+        self.lbl.setText(f"Picked: {len(self._xs)}"); self._ok.setEnabled(len(self._xs) > 0)
+
+    def _clear(self):
+        self._xs.clear(); self._ys.clear()
+        for it in self._tmp_items:
+            try: it.scene().removeItem(it)
+            except Exception: pass
+        self._tmp_items.clear()
+        self.lbl.setText("Picked: 0"); self._ok.setEnabled(False)
+
+    def exec(self):
+        try:
+            return super().exec()
+        finally:
+            try: self._map.clicked.disconnect(self._on_map_click)
+            except Exception: pass
+            for it in self._tmp_items:
+                try: it.scene().removeItem(it)
+                except Exception: pass
+            self._tmp_items.clear()
+
+    def result_points(self) -> Optional[List[Tuple[float,float]]]:
+        if not self._xs:
+            return None
+        return list(zip(self._xs, self._ys))
 
 
 # ----- helper dialog for PTZ (left/right) -----

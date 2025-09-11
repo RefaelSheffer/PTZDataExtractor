@@ -329,7 +329,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ptz_cgi_poll.valueChanged.connect(lambda _: self._save_app_cfg())
         self.ptz_cgi_https.stateChanged.connect(lambda _: self._save_app_cfg())
         self.hevc_guard.valueChanged.connect(lambda v: (setattr(self, 'hevc_guard_ms', v), self._save_app_cfg()))
-        self.prefer_h264_chk.stateChanged.connect(lambda _: (setattr(self, 'prefer_h264', self.prefer_h264_chk.isChecked()), self._save_app_cfg()))
+        self.prefer_h264_chk.stateChanged.connect(self._on_prefer_h264_changed)
         self.suppress_stderr_chk.stateChanged.connect(lambda _: (setattr(self, 'suppress_stderr', self.suppress_stderr_chk.isChecked()), self._update_suppress(), self._save_app_cfg()))
 
         # ---------- Timer ----------
@@ -993,13 +993,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profile_name.clear()
         self._log(f"Deleted profile: {name}")
 
+    def _on_prefer_h264_changed(self, _: int):
+        self.prefer_h264 = self.prefer_h264_chk.isChecked()
+        self._save_app_cfg()
+
     def _save_app_cfg(self):
         self._cfg.update({
             "mediamtx_path": self.mediamtx_path.text().strip(),
             "ffmpeg_path": self.ffmpeg_path.text().strip(),
             "ffprobe_path": self.ffprobe_path.text().strip(),
             "hevc_guard_ms": self.hevc_guard.value(),
-            "prefer_h264": self.prefer_h264_chk.isChecked(),
+            "prefer_h264": self.prefer_h264,
             "suppress_stderr": self.suppress_stderr_chk.isChecked(),
             "ptz_cgi_port": self.ptz_cgi_port.value(),
             "ptz_cgi_channel": self.ptz_cgi_channel.value(),

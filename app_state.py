@@ -22,20 +22,20 @@ class Distortion:
 @dataclass
 class LiveCameraContext:
     online: bool
-    brand: str | None
     host: str
-    port: int
     rtsp_url: str
-    user: str | None
-    transport: Literal["tcp", "udp"]
-    codec: str | None
-    width: int | None
-    height: int | None
-    fps: float | None
-    serial: str | None
-    model: str | None
-    intrinsics: Optional[Intrinsics]
-    distortion: Optional[Distortion]
+    brand: str | None = None
+    port: int | None = None
+    user: str | None = None
+    transport: Literal["tcp", "udp"] = "udp"
+    codec: str | None = None
+    width: int | None = None
+    height: int | None = None
+    fps: float | None = None
+    serial: str | None = None
+    model: str | None = None
+    intrinsics: Optional[Intrinsics] = None
+    distortion: Optional[Distortion] = None
     layers: Optional[Dict[str, Any]] = None
     calibration: Optional[Dict[str, float]] = None
     alias: str | None = None

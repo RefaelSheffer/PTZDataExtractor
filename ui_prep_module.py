@@ -3,6 +3,7 @@
 # Preparation (DTM GeoTIFF + Ortho + Camera pose)
 
 from pathlib import Path
+import math
 from PySide6 import QtCore, QtWidgets, QtGui
 import vlc
 
@@ -334,3 +335,71 @@ class PrepModule(QtCore.QObject):
         self._log(f"Saved bundle -> {out}")
         QtWidgets.QMessageBox.information(None, "Saved", f"Saved bundle:\n{out}")
         self._refresh_bundles()
+
+    # ---------- Project IO helpers ----------
+    def current_bundle_name(self) -> str:
+        return self.ed_name.text().strip()
+
+    def get_dtm_path(self) -> str:
+        return self.ed_dtm.text().strip()
+
+    def apply_bundle(self, bundle: dict):
+        """Populate UI fields from bundle dict."""
+        if not bundle:
+            return
+        self.ed_name.setText(bundle.get("name", ""))
+        intr = bundle.get("intrinsics", {})
+        w = int(intr.get("width", 0))
+        h = int(intr.get("height", 0))
+        fx = float(intr.get("fx", 0.0))
+        if w:
+            self.spn_w.setValue(w)
+        if h:
+            self.spn_h.setValue(h)
+        if w and fx:
+            hfov = math.degrees(2 * math.atan(w / (2 * fx)))
+            self.spn_fov.setValue(hfov)
+        pose = bundle.get("pose", {})
+        self.spn_x.setValue(float(pose.get("x", 0.0)))
+        self.spn_y.setValue(float(pose.get("y", 0.0)))
+        self.spn_z.setValue(float(pose.get("z", 0.0)))
+        self.spn_yaw.setValue(float(pose.get("yaw", 0.0)))
+        self.spn_pitch.setValue(float(pose.get("pitch", 0.0)))
+        self.spn_roll.setValue(float(pose.get("roll", 0.0)))
+
+    def apply_project_layers(self, dtm_path: str | None, ortho_path: str | None):
+        """Load DTM/Ortho layers from project paths."""
+        if dtm_path:
+            self.ed_dtm.setText(dtm_path)
+            shared_state.dtm_path = dtm_path
+            self._map_layer = None
+            try:
+                self._ensure_base_map()
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(None, "DTM", f"Failed to load DTM: {e}")
+        if ortho_path:
+            self._load_orthophoto_path(ortho_path)
+
+    def _load_orthophoto_path(self, path: str):
+        try:
+            from raster_layer import RasterLayer
+            from ui_map_tools import numpy_to_qimage
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Missing map tools: {e}")
+            return
+        try:
+            self._ortho_layer = RasterLayer(path, max_size=2048)
+            img = numpy_to_qimage(self._ortho_layer.downsampled_image())
+            pix = QtGui.QPixmap.fromImage(img)
+            sc = self._ensure_scene()
+            if self._ortho_pixmap is None:
+                self._ortho_pixmap = QtWidgets.QGraphicsPixmapItem(pix)
+                self._ortho_pixmap.setZValue(1)
+                sc.addItem(self._ortho_pixmap)
+            else:
+                self._ortho_pixmap.setPixmap(pix)
+            shared_state.orthophoto_path = path
+            self._update_layer_visibility()
+            self._log(f"Orthophoto loaded (EPSG={self._ortho_layer.ds.crs.to_epsg()})")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")

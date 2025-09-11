@@ -404,6 +404,7 @@ class CameraModule(QtCore.QObject):
         self._publish_ptz_cfg()
         self._start_ptz_meta(h, user, pwd)
         self._update_live_context(url, h, tcp, codec, width, height, fps, user, pwd)
+        self._log("Active camera set from Cameras tab")
 
     # ===== Real =====
     def _auto_try_dahua(self):
@@ -582,6 +583,7 @@ class CameraModule(QtCore.QObject):
             self._publish_ptz_cfg()
             self._start_ptz_meta(h, user, pwd)
             self._update_live_context(url, h, tcp, codec, width, height, fps, user, pwd)
+            self._log("Active camera set from Cameras tab")
             return
 
         # ONVIF → RTSP
@@ -635,6 +637,7 @@ class CameraModule(QtCore.QObject):
         self._publish_ptz_cfg()
         self._start_ptz_meta(h, user, pwd)
         self._update_live_context(url, h, tcp, codec, width, height, fps, user, pwd)
+        self._log("Active camera set from Cameras tab")
 
     # ===== Quick tools =====
     def _quick_check(self):

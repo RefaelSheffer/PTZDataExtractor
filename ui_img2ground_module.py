@@ -26,6 +26,7 @@ from ui_common import VlcVideoWidget
 from ui_calibration_module import HorizonAzimuthCalibrationDialog
 import shared_state
 from app_state import app_state
+from event_bus import bus
 
 from any_ptz_client import AnyPTZClient
 from onvif_ptz import PTZReading
@@ -417,6 +418,7 @@ class Img2GroundModule(QtCore.QObject):
 
         self._t = QtCore.QTimer(self._root); self._t.timeout.connect(self._update_metrics); self._t.start(800)
         self._ptz_timer = QtCore.QTimer(self._root); self._ptz_timer.timeout.connect(self._poll_ptz_ui); self._ptz_timer.start(400)
+        bus.signal_camera_changed.connect(self._on_active_camera_changed)
 
     def widget(self) -> QtWidgets.QWidget:
         return self._root
@@ -629,6 +631,16 @@ class Img2GroundModule(QtCore.QObject):
         lock = self.chk_lock_cam.isChecked()
         for w in (self.fx, self.fy, self.cx, self.cy, self.k1, self.k2, self.p1, self.p2, self.k3):
             w.setReadOnly(lock)
+
+    def _on_active_camera_changed(self, ctx) -> None:
+        if not ctx:
+            return
+        self.ed_rtsp.setText(ctx.rtsp_url or "")
+        if self.chk_use_active.isChecked():
+            self.use_active_camera(force=True)
+            if ctx.rtsp_url:
+                self._set_media(ctx.rtsp_url, is_file=False)
+                self._log("Image→Ground: playing from active camera")
 
     def use_active_camera(self, force: bool = False):
         if not force and not self.chk_use_active.isChecked():

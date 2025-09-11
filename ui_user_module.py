@@ -125,7 +125,7 @@ class UserTab(QtWidgets.QWidget):
         # authentication and transport settings are respected. Without these
         # options some cameras would refuse the connection, resulting in no
         # video being shown in the *USER* tab.
-        opts = [":avcodec-hw=none", ":network-caching=800", ":no-video-title-show"]
+        opts = [":avcodec-hw=none", ":network-caching=1200", ":clock-jitter=0", ":no-video-title-show"]
         if getattr(cam, "transport", "udp") == "tcp" or getattr(cam, "used_tcp", False):
             opts.append(":rtsp-tcp")
         media = self._vlc.media_new(cam.rtsp_url, *opts)

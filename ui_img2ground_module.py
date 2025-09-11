@@ -507,12 +507,11 @@ class Img2GroundModule(QtCore.QObject):
         # camera model / calibration
         # keep Az button disabled until we have both ortho & pan
         self.btn_az_from_ortho.setEnabled(False)
-        # update enablement whenever prerequisites change
-        QtCore.QTimer.singleShot(500, self._refresh_az_btn_state)
-        if hasattr(self._map, "sceneChanged"):
-            self._map.sceneChanged.connect(
-                lambda: QtCore.QTimer.singleShot(0, self._refresh_az_btn_state)
-            )
+        # periodic refresh until PAN telemetry arrives
+        self._az_btn_timer = QtCore.QTimer(self._root)
+        self._az_btn_timer.setInterval(800)
+        self._az_btn_timer.timeout.connect(self._refresh_az_btn_state)
+        self._az_btn_timer.start()
         self.chk_use_active = QtWidgets.QCheckBox("Use active camera (from RTSP tab)")
         self.chk_use_active.toggled.connect(self.use_active_camera)
         self.btn_refresh_cam = QtWidgets.QPushButton("\uD83D\uDD04 Refresh from live")
@@ -657,7 +656,7 @@ class Img2GroundModule(QtCore.QObject):
             else:
                 media = self._vlc.media_new(mrl)
                 if hasattr(media, "add_option"):
-                    media.add_option(":network-caching=800")
+                    media.add_option(":network-caching=1200")
                     # TCP/UDP לפי ההקשר (ברירת־מחדל: TCP)
                     transport = getattr(ctx, "transport", "tcp") if ctx else "tcp"
                     if transport == "tcp":
@@ -670,7 +669,9 @@ class Img2GroundModule(QtCore.QObject):
                     if p:
                         media.add_option(f":rtsp-pwd={p}")
             if hasattr(media, "add_option"):
-                media.add_option(":avcodec-hw=none"); media.add_option(":no-video-title-show")
+                media.add_option(":clock-jitter=0")
+                media.add_option(":avcodec-hw=none")
+                media.add_option(":no-video-title-show")
             self._media = media; self._player.set_media(self._media); self._player.play()
             QtCore.QTimer.singleShot(150, lambda: self.video.ensure_video_out())
             self._log(f"Playing: {mrl}"); self.lbl_status.setText(f"Playing: {mrl}")
@@ -772,9 +773,16 @@ class Img2GroundModule(QtCore.QObject):
         return sc
 
     def _try_load_shared_ortho(self):
-        path = getattr(shared_state, "orthophoto_path", None)
+        alias = getattr(app_state.current_camera, "alias", None)
+        path = None
+        if alias:
+            layers = shared_state.layers_for_camera.get(alias, {})
+            path = layers.get("ortho")
+        if not path:
+            path = getattr(shared_state, "orthophoto_path", None)
         if path and Path(path).exists():
-            self._load_orthophoto(path)
+            self._load_orthophoto(path, broadcast=False)
+        self._refresh_az_btn_state()
 
     def _load_orthophoto(self, path: Optional[str] = None, *, broadcast: bool = True):
         if not path:
@@ -788,11 +796,16 @@ class Img2GroundModule(QtCore.QObject):
             pix = QtGui.QPixmap.fromImage(img)
             sc = self._ensure_scene(); sc.clear()
             self._ortho_pix = QtWidgets.QGraphicsPixmapItem(pix); self._ortho_pix.setZValue(0); sc.addItem(self._ortho_pix)
-            self._map.setSceneRect(self._ortho_pix.boundingRect()); self._map.fit()
+            self._map.setSceneRect(self._ortho_pix.boundingRect())
+            try:
+                self._map.fit()
+            except Exception:
+                pass
             self._log(f"Orthophoto loaded (EPSG={self._ortho_layer.ds.crs.to_epsg()})")
             self._remove_last_pick(); self._remove_video_frame_outline(); self._remove_fov_wedge()
             if broadcast:
                 self._update_shared_layers()
+            self._refresh_az_btn_state()
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 
@@ -830,6 +843,11 @@ class Img2GroundModule(QtCore.QObject):
                 self._dtm_path = dtm
             except Exception:
                 pass
+        try:
+            self._map.fit()
+        except Exception:
+            pass
+        self._refresh_az_btn_state()
 
     def _resolve_path(self, p: str | None) -> str | None:
         if not p:
@@ -956,9 +974,9 @@ class Img2GroundModule(QtCore.QObject):
         # 2) גלובלי רץ מהטאב Cameras
         meta = getattr(app_state, "ptz_meta", None)
         try:
-            last = meta.last() if meta else None
-            if last and last.pan_deg is not None:
-                return float(last.pan_deg)
+            last = meta.last() if hasattr(meta, "last") else meta
+            if last and (getattr(last, "pan_deg", None) is not None or (isinstance(last, dict) and last.get("pan_deg") is not None)):
+                return float(getattr(last, "pan_deg", last["pan_deg"]))
         except Exception:
             pass
         # 3) מה-context (אם נשמר שם)
@@ -968,9 +986,9 @@ class Img2GroundModule(QtCore.QObject):
         return None
 
     def _refresh_az_btn_state(self):
-        has_ortho = self._ortho_layer is not None
-        has_pan = self._get_pan_now() is not None
-        self.btn_az_from_ortho.setEnabled(bool(has_ortho and has_pan))
+        has_ortho = (self._ortho_layer is not None)
+        has_pan   = (self._get_pan_now() is not None)
+        self.btn_az_from_ortho.setEnabled(has_ortho and has_pan)
 
     def _calibrate_fov_with_ptz(self):
         """Calibrate yaw offset and FOV using PTZ telemetry.

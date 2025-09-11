@@ -709,7 +709,7 @@ class MainWindow(QtWidgets.QMainWindow):
         opts = []
         if force_tcp:
             opts.append(':rtsp-tcp')
-        opts += [':avcodec-hw=none', ':network-caching=800']
+        opts += [':avcodec-hw=none', ':network-caching=1200', ':clock-jitter=0']
 
         media = self.vlc_instance.media_new(url, *opts)
         self._current_media = media  # keep ref!

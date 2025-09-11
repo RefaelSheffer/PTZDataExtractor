@@ -731,7 +731,7 @@ class CameraModule(QtCore.QObject):
         opts = []
         if force_tcp:
             opts.append(':rtsp-tcp')
-        opts += [':avcodec-hw=none', ':network-caching=800', ':no-video-title-show']
+        opts += [':avcodec-hw=none', ':network-caching=1200', ':clock-jitter=0', ':no-video-title-show']
 
         media = self.vlc_instance.media_new(url, *opts)
         if user:

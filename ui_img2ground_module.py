@@ -414,7 +414,9 @@ class Img2GroundModule(QtCore.QObject):
         self._root = self._build_ui()
         self._attach_vlc_events()
         QtCore.QTimer.singleShot(0, self._try_load_shared_ortho)
+        self.chk_use_active.blockSignals(True)
         self.chk_use_active.setChecked(True)
+        self.chk_use_active.blockSignals(False)
         try:
             self.btn_play_rtsp.hide(); self.btn_play_file.hide()
         except Exception:
@@ -672,11 +674,12 @@ class Img2GroundModule(QtCore.QObject):
         self._log(msg)
 
     def use_active_camera(self, force: bool = False):
-        if not force and not self.chk_use_active.isChecked():
-            return
-        ctx = app_state.current_camera
+        ctx = getattr(app_state, "current_camera", None)
         if not ctx:
-            QtWidgets.QMessageBox.warning(None, "Active camera", "No active camera")
+            if force:
+                QtWidgets.QMessageBox.warning(None, "Active camera", "No active camera")
+            return
+        if not force and not self.chk_use_active.isChecked():
             return
         if ctx.rtsp_url:
             self.ed_rtsp.setText(ctx.rtsp_url)

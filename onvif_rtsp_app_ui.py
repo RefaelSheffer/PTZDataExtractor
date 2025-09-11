@@ -22,7 +22,7 @@ from camera_io import (
     onvif_get_rtsp_uri, ONVIFCamera
 )
 from onvif_ptz import PtzMetaThread
-from ptz_cgi import PtzCgiThread
+from any_ptz_client import AnyPTZClient
 
 APP_DIR = Path(__file__).resolve().parent
 PROFILES_PATH = APP_DIR / "profiles.json"
@@ -127,7 +127,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._hevc_guard_tried = False
         self._last_codec = ""
         self._ptz_meta: Optional[PtzMetaThread] = None
-        self._ptz_cgi: Optional[PtzCgiThread] = None
+        self._ptz_client: Optional[AnyPTZClient] = None
 
         # Auto-retry state for preview
         self._retry_url = ""
@@ -609,33 +609,38 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
             self._ptz_meta = None
-        if self._ptz_cgi:
+        if self._ptz_client:
             try:
-                self._ptz_cgi.stop()
+                self._ptz_client.stop()
             except Exception:
                 pass
-            self._ptz_cgi = None
+            self._ptz_client = None
+        csv_path = str(Path.cwd() / 'ptz_log.csv')
         try:
-            csv_path = str(Path.cwd() / 'ptz_log.csv')
             onvif_port = int(self.onvif_port.value())
-            self._ptz_meta = PtzMetaThread(host, onvif_port, user, pwd, poll_hz=5.0,
-                                           csv_path=csv_path)
-            self._ptz_meta.start()
-            print(f"PTZ telemetry logging -> {csv_path}")
-        except Exception as e:
-            print(f"Failed to start PTZ telemetry: {e}")
-        try:
-            csv_path2 = str(Path.cwd() / 'ptz_cgi_log.csv')
             port = int(self.ptz_cgi_port.value())
             chan = int(self.ptz_cgi_channel.value())
             hz = float(self.ptz_cgi_poll.value())
             https = self.ptz_cgi_https.isChecked()
-            self._ptz_cgi = PtzCgiThread(host, port, user, pwd, channel=chan,
-                                         poll_hz=hz, https=https, csv_path=csv_path2)
-            self._ptz_cgi.start()
-            print(f"PTZ CGI logging -> {csv_path2}")
+            self._ptz_client = AnyPTZClient(
+                host,
+                onvif_port,
+                user,
+                pwd,
+                cgi_port=port,
+                cgi_channel=chan,
+                cgi_poll_hz=hz,
+                https=https,
+            )
+            self._ptz_meta = PtzMetaThread(
+                client=self._ptz_client,
+                csv_path=csv_path,
+            )
+            self._ptz_meta.start()
+            mode = self._ptz_client.mode.upper() if self._ptz_client.mode else ""
+            print(f"PTZ telemetry ({mode}) logging -> {csv_path}")
         except Exception as e:
-            print(f"Failed to start PTZ CGI telemetry: {e}")
+            print(f"Failed to start PTZ telemetry: {e}")
 
     # ===== Quick tools =====
     def _quick_check(self):
@@ -743,12 +748,12 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
             self._ptz_meta = None
-        if self._ptz_cgi:
+        if self._ptz_client:
             try:
-                self._ptz_cgi.stop()
+                self._ptz_client.stop()
             except Exception:
                 pass
-            self._ptz_cgi = None
+            self._ptz_client = None
 
         # cancel auto-retry
         self._retry_url = ""

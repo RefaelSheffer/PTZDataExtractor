@@ -11,5 +11,8 @@ orthophoto_path: Optional[str] = None
 # מבנה: {"x": float, "y": float, "epsg": int}
 camera_proj: Optional[Dict] = None
 
+# אחרון הגדרות ONVIF/PTZ ששיתפנו בין הטאבים
+onvif_cfg: Optional[Dict] = None
+
 # אחרון מצב וטלמטריית PTZ (מ-PtzMetaThread)
 ptz_meta: Optional[Dict] = None

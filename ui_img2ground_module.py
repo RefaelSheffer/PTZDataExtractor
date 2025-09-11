@@ -27,8 +27,8 @@ from ui_calibration_module import HorizonAzimuthCalibrationDialog
 import shared_state
 from app_state import app_state
 
-from onvif_ptz import OnvifPTZClient, PTZReading
-from ptz_cgi import PtzCgiThread
+from any_ptz_client import AnyPTZClient
+from onvif_ptz import PTZReading
 
 APP_DIR = Path(__file__).resolve().parent
 APP_CFG = APP_DIR / "app_config.json"
@@ -742,26 +742,29 @@ class Img2GroundModule(QtCore.QObject):
         self._ptz = None
 
         try:
-            self._ptz = OnvifPTZClient(host, onvif_port, user, pwd, poll_hz=5.0)
+            cgi_port = int(self.ptz_cgi_port.value())
+            cgi_chan = int(self.ptz_cgi_channel.value())
+            cgi_hz = float(self.ptz_cgi_poll.value())
+            cgi_https = self.ptz_cgi_https.isChecked()
+            self._ptz = AnyPTZClient(
+                host,
+                onvif_port,
+                user,
+                pwd,
+                cgi_port=cgi_port,
+                cgi_channel=cgi_chan,
+                cgi_poll_hz=cgi_hz,
+                https=cgi_https,
+            )
             self._ptz.start()
-            self._log("PTZ: ONVIF connected")
-        except Exception as e_onvif:
-            try:
-                cgi_port = int(self.ptz_cgi_port.value())
-                cgi_chan = int(self.ptz_cgi_channel.value())
-                cgi_hz = float(self.ptz_cgi_poll.value())
-                cgi_https = self.ptz_cgi_https.isChecked()
-                self._ptz = PtzCgiThread(host, cgi_port, user, pwd,
-                                         channel=cgi_chan, poll_hz=cgi_hz, https=cgi_https)
-                self._ptz.start()
-                self._log(f"PTZ: CGI connected ({'https' if cgi_https else 'http'})")
-            except Exception as e_cgi:
-                QtWidgets.QMessageBox.warning(
-                    None,
-                    "PTZ",
-                    f"Failed ONVIF ({e_onvif}); CGI fallback failed ({e_cgi}).",
-                )
-                self._ptz = None
+            if self._ptz.mode == "onvif":
+                self._log("PTZ: ONVIF connected")
+            elif self._ptz.mode == "cgi":
+                proto = "https" if cgi_https else "http"
+                self._log(f"PTZ: CGI connected ({proto})")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(None, "PTZ", str(e))
+            self._ptz = None
 
     def _poll_ptz_ui(self):
         if not self._ptz: return

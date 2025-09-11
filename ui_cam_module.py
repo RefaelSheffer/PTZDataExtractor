@@ -1187,6 +1187,20 @@ class CameraModule(QtCore.QObject):
             except Exception:
                 pass
         intr, dist = load_calibration(serial, model, width, height)
+        layers = {}
+        if shared_state.dtm_path:
+            layers["dtm"] = shared_state.dtm_path
+        if shared_state.orthophoto_path:
+            layers["ortho"] = shared_state.orthophoto_path
+        calib = None
+        if intr or dist:
+            calib = {}
+            if intr:
+                calib.update({"fx": intr.fx, "fy": intr.fy, "cx": intr.cx, "cy": intr.cy})
+            if dist:
+                calib.update({"k1": dist.k1, "k2": dist.k2, "p1": dist.p1, "p2": dist.p2})
+                if dist.k3 is not None:
+                    calib["k3"] = dist.k3
         ctx = LiveCameraContext(
             online=True,
             brand=brand,
@@ -1203,6 +1217,8 @@ class CameraModule(QtCore.QObject):
             model=model,
             intrinsics=intr,
             distortion=dist,
+            layers=layers or None,
+            calibration=calib,
         )
         app_state.current_camera = ctx
         try:

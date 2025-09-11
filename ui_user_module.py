@@ -26,6 +26,7 @@ from ui_map_tools import MapView, numpy_to_qimage
 from raster_layer import RasterLayer
 from app_state import app_state
 import shared_state
+from event_bus import bus
 
 
 class UserTab(QtWidgets.QWidget):
@@ -55,7 +56,7 @@ class UserTab(QtWidgets.QWidget):
         # ----- layer selectors -----
         self.dtm_edit = QtWidgets.QLineEdit()
         self.ortho_edit = QtWidgets.QLineEdit()
-        btn_load = QtWidgets.QPushButton("Load layers")
+        btn_load = QtWidgets.QPushButton("Override…")
         hrow = QtWidgets.QHBoxLayout()
         hrow.addWidget(QtWidgets.QLabel("DTM:"))
         hrow.addWidget(self.dtm_edit, 1)
@@ -79,6 +80,8 @@ class UserTab(QtWidgets.QWidget):
         vbox = QtWidgets.QVBoxLayout(self)
         vbox.addWidget(bar)
         vbox.addLayout(hrow)
+        self.lbl_calib = QtWidgets.QLabel("Calibration: N/A")
+        vbox.addWidget(self.lbl_calib)
         vbox.addWidget(splitter, 1)
 
         # ----- signal wiring -----
@@ -88,16 +91,10 @@ class UserTab(QtWidgets.QWidget):
         self.act_qr.triggered.connect(self.on_make_qr)
         btn_load.clicked.connect(self.on_load_layers)
 
-        # Auto-populate layer paths from shared state when available
-        if getattr(shared_state, "dtm_path", None):
-            self.dtm_edit.setText(shared_state.dtm_path)
-        if getattr(shared_state, "orthophoto_path", None):
-            self.ortho_edit.setText(shared_state.orthophoto_path)
-            # try loading immediately when an ortho path is known
-            self.on_load_layers()
-
-        # Start the live video preview
+        bus.signal_camera_changed.connect(self._on_active_camera_changed)
         self.mount_video_preview()
+        if app_state.current_camera:
+            self._on_active_camera_changed(app_state.current_camera)
 
     # ------------------------------------------------------------------
     # UI helpers
@@ -128,6 +125,8 @@ class UserTab(QtWidgets.QWidget):
     def on_load_layers(self) -> None:
         dtm = self.dtm_edit.text().strip()
         ortho = self.ortho_edit.text().strip()
+        shared_state.dtm_path = dtm or None
+        shared_state.orthophoto_path = ortho or None
         try:
             if ortho:
                 self._ortho_layer = RasterLayer(ortho, max_size=2048)
@@ -145,6 +144,26 @@ class UserTab(QtWidgets.QWidget):
             self._toast("Layers loaded")
         except Exception as e:  # pragma: no cover - UI feedback
             self._toast(f"Layer load failed: {e}", error=True)
+
+    def _on_active_camera_changed(self, ctx):
+        if not ctx:
+            return
+        self.mount_video_preview()
+        layers = getattr(ctx, "layers", None)
+        if layers:
+            self.dtm_edit.setText(layers.get("dtm", ""))
+            self.ortho_edit.setText(layers.get("ortho", ""))
+            self.on_load_layers()
+        calib = getattr(ctx, "calibration", None)
+        if calib:
+            self._fill_calibration_ui(calib)
+
+    def _fill_calibration_ui(self, calib: dict) -> None:
+        parts = []
+        for key in ("fx", "fy", "cx", "cy", "k1", "k2", "p1", "p2", "k3"):
+            if key in calib and calib[key] is not None:
+                parts.append(f"{key}={calib[key]:.2f}")
+        self.lbl_calib.setText("Calibration: " + ", ".join(parts) if parts else "Calibration: N/A")
 
     # ------------------------------------------------------------------
     # Actions - mostly placeholders for now

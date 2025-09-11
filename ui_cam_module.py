@@ -24,7 +24,13 @@ from any_ptz_client import AnyPTZClient
 
 from ui_common import VlcVideoWidget, default_vlc_path, open_folder, redact
 import shared_state  # <<< לשיתוף הגדרות ה-PTZ עם מודולים אחרים
-from app_state import app_state, LiveCameraContext, load_calibration
+from app_state import (
+    app_state,
+    LiveCameraContext,
+    load_calibration,
+    Intrinsics,
+    Distortion,
+)
 from event_bus import bus
 
 APP_DIR = Path(__file__).resolve().parent
@@ -401,7 +407,7 @@ class CameraModule(QtCore.QObject):
         self._start_player(url)
 
         # --- publish + set Active Camera ---
-        h = parse_host_from_rtsp(url) or ""
+        h = self.host.text().strip() or parse_host_from_rtsp(url) or ""
         user = self.user.text().strip()
         pwd = self.pwd.text().strip()
         tcp = True
@@ -1201,35 +1207,89 @@ class CameraModule(QtCore.QObject):
         except Exception as e:
             self._log(f"Failed to start PTZ telemetry: {e}")
 
-    def _update_live_context(self, url: str, host: str, tcp: bool, codec: str,
-                              width: Optional[int], height: Optional[int],
-                              fps: Optional[float], user: str, pwd: str) -> None:
+    def _update_live_context(
+        self,
+        url: str,
+        host: str,
+        tcp: bool,
+        codec: str,
+        width: Optional[int],
+        height: Optional[int],
+        fps: Optional[float],
+        user: str,
+        pwd: str,
+    ) -> None:
+        alias = (
+            self.profile_name.text().strip()
+            or self.profiles_combo.currentText().strip()
+            or "default"
+        )
         brand = model = serial = None
         if ONVIFCamera is not None:
             try:
                 cam = ONVIFCamera(host, int(self.onvif_port.value()), user, pwd)
                 dev = cam.create_device_service()
                 info = dev.GetDeviceInformation()
-                brand = getattr(info, 'Manufacturer', None)
-                model = getattr(info, 'Model', None)
-                serial = getattr(info, 'SerialNumber', None)
+                brand = getattr(info, "Manufacturer", None)
+                model = getattr(info, "Model", None)
+                serial = getattr(info, "SerialNumber", None)
             except Exception:
                 pass
-        intr, dist = load_calibration(serial, model, width, height)
-        layers = {}
-        if shared_state.dtm_path:
-            layers["dtm"] = shared_state.dtm_path
-        if shared_state.orthophoto_path:
-            layers["ortho"] = shared_state.orthophoto_path
+
+        proj = getattr(app_state, "project", None)
+        layers = None
         calib = None
-        if intr or dist:
-            calib = {}
-            if intr:
-                calib.update({"fx": intr.fx, "fy": intr.fy, "cx": intr.cx, "cy": intr.cy})
-            if dist:
-                calib.update({"k1": dist.k1, "k2": dist.k2, "p1": dist.p1, "p2": dist.p2})
-                if dist.k3 is not None:
-                    calib["k3"] = dist.k3
+        if proj:
+            layers = getattr(proj, "layers_for_camera", {}).get(alias) or getattr(
+                proj, "layers", None
+            )
+            calib = getattr(proj, "calibration_for_camera", {}).get(alias) or getattr(
+                proj, "calibration", None
+            )
+        if not layers:
+            layers = {}
+            if shared_state.dtm_path:
+                layers["dtm"] = shared_state.dtm_path
+            if shared_state.orthophoto_path:
+                layers["ortho"] = shared_state.orthophoto_path
+            if not layers:
+                layers = None
+
+        intr = dist = None
+        if calib:
+            try:
+                if all(k in calib for k in ("fx", "fy", "cx", "cy")):
+                    intr = Intrinsics(
+                        fx=float(calib.get("fx", 0.0)),
+                        fy=float(calib.get("fy", 0.0)),
+                        cx=float(calib.get("cx", 0.0)),
+                        cy=float(calib.get("cy", 0.0)),
+                    )
+                if any(k in calib for k in ("k1", "k2", "p1", "p2", "k3")):
+                    dist = Distortion(
+                        k1=float(calib.get("k1", 0.0)),
+                        k2=float(calib.get("k2", 0.0)),
+                        p1=float(calib.get("p1", 0.0)),
+                        p2=float(calib.get("p2", 0.0)),
+                        k3=float(calib["k3"]) if calib.get("k3") is not None else None,
+                    )
+            except Exception:
+                intr = dist = None
+        if calib is None:
+            intr, dist = load_calibration(serial, model, width, height)
+            if intr or dist:
+                calib = {}
+                if intr:
+                    calib.update(
+                        {"fx": intr.fx, "fy": intr.fy, "cx": intr.cx, "cy": intr.cy}
+                    )
+                if dist:
+                    calib.update(
+                        {"k1": dist.k1, "k2": dist.k2, "p1": dist.p1, "p2": dist.p2}
+                    )
+                    if dist.k3 is not None:
+                        calib["k3"] = dist.k3
+
         ctx = LiveCameraContext(
             online=True,
             brand=brand,
@@ -1237,7 +1297,8 @@ class CameraModule(QtCore.QObject):
             port=int(self.rtsp_port.value()),
             rtsp_url=url,
             user=user or None,
-            transport='tcp' if tcp else 'udp',
+            pwd=pwd or None,
+            transport="tcp" if tcp else "udp",
             codec=codec,
             width=width,
             height=height,
@@ -1246,8 +1307,13 @@ class CameraModule(QtCore.QObject):
             model=model,
             intrinsics=intr,
             distortion=dist,
-            layers=layers or None,
+            layers=layers,
             calibration=calib,
+            alias=alias,
+            used_tcp=tcp,
+            mock_file=(
+                getattr(proj, "mock_file_for_camera", {}).get(alias) if proj else None
+            ),
         )
         app_state.current_camera = ctx
         try:

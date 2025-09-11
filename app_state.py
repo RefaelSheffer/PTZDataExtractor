@@ -38,6 +38,10 @@ class LiveCameraContext:
     distortion: Optional[Distortion]
     layers: Optional[Dict[str, Any]] = None
     calibration: Optional[Dict[str, float]] = None
+    alias: str | None = None
+    pwd: str | None = None
+    used_tcp: bool | None = None
+    mock_file: str | None = None
 
 
 class AppState:

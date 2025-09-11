@@ -460,6 +460,13 @@ class Img2GroundModule(QtCore.QObject):
         rowp.addStretch(1); rowp.addWidget(self.btn_pick_now)
         g.addLayout(rowp, r, 0, 1, 8); r += 1
 
+        # utilities for last coordinates
+        row2 = QtWidgets.QHBoxLayout()
+        self.btn_copy = QtWidgets.QPushButton("Copy last coords"); self.btn_copy.clicked.connect(self._copy_last)
+        self.btn_qr = QtWidgets.QPushButton("Show QR"); self.btn_qr.clicked.connect(self._show_qr)
+        row2.addWidget(self.btn_copy); row2.addWidget(self.btn_qr); row2.addStretch(1)
+        g.addLayout(row2, r, 0, 1, 8); r += 1
+
         # status + metrics
         self.lbl_status = QtWidgets.QLabel(""); g.addWidget(self.lbl_status, r, 0, 1, 8); r += 1
         self.lbl_metrics = QtWidgets.QLabel("State: idle | 0x0 | FPS:?"); g.addWidget(self.lbl_metrics, r, 0, 1, 8); r += 1
@@ -910,6 +917,32 @@ class Img2GroundModule(QtCore.QObject):
             self.lbl_status.setText(f"CALIB: lat={lat:.7f}, lon={lon:.7f} | XY(EPSG:{epsg})=({X:.2f}, {Y:.2f})")
         except Exception as e:
             self.lbl_status.setText(f"scene_to_geo failed: {e}")
+
+    def _copy_last(self):
+        if not self._last_geo:
+            QtWidgets.QMessageBox.information(None, "Copy", "No coordinates yet."); return
+        QtWidgets.QApplication.clipboard().setText(f"{self._last_geo['lat']:.7f},{self._last_geo['lon']:.7f}")
+
+    def _show_qr(self):
+        if not self._last_geo:
+            QtWidgets.QMessageBox.information(None, "QR", "No coordinates yet."); return
+        try:
+            import qrcode
+            from PIL import ImageQt
+        except Exception:
+            url = f"https://maps.google.com/?q={self._last_geo['lat']:.7f},{self._last_geo['lon']:.7f}"
+            QtWidgets.QMessageBox.information(None, "QR",
+                "Install to enable QR:\n  python -m pip install qrcode pillow\n" f"URL:\n{url}")
+            return
+        url = f"https://maps.google.com/?q={self._last_geo['lat']:.7f},{self._last_geo['lon']:.7f}"
+        img = qrcode.make(url)
+        qim = ImageQt.ImageQt(img)
+        pix = QtGui.QPixmap.fromImage(qim)
+        dlg = QtWidgets.QDialog(); dlg.setWindowTitle("QR (Google Maps)")
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lab = QtWidgets.QLabel(); lab.setPixmap(pix); lab.setAlignment(QtCore.Qt.AlignCenter); lay.addWidget(lab)
+        lab2 = QtWidgets.QLabel(url); lab2.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse); lay.addWidget(lab2)
+        dlg.resize(300, 340); dlg.exec()
 
     def _on_video_click(self, u: int, v: int):
         self._map_from_click(u, v, uv_in_calib_space=False)

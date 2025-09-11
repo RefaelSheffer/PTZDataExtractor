@@ -614,7 +614,7 @@ class Img2GroundModule(QtCore.QObject):
             QtWidgets.QMessageBox.information(None, "Video", "Choose a valid video file."); return
         self._set_media(p, is_file=True)
 
-    def _set_media(self, mrl: str, is_file: bool):
+    def _set_media(self, mrl: str, is_file: bool, ctx=None):
         try:
             if is_file:
                 p = Path(mrl); uri = p.as_uri()
@@ -626,7 +626,18 @@ class Img2GroundModule(QtCore.QObject):
             else:
                 media = self._vlc.media_new(mrl)
                 if hasattr(media, "add_option"):
-                    media.add_option(":network-caching=800"); media.add_option(":rtsp-tcp")
+                    media.add_option(":network-caching=800")
+                    # TCP/UDP לפי ההקשר (ברירת־מחדל: TCP)
+                    transport = getattr(ctx, "transport", "tcp") if ctx else "tcp"
+                    if transport == "tcp":
+                        media.add_option(":rtsp-tcp")
+                    # אם יש user/pass מה־Active Camera – להוסיף
+                    u = getattr(ctx, "user", None) if ctx else None
+                    p = getattr(ctx, "pwd",  None) if ctx else None
+                    if u:
+                        media.add_option(f":rtsp-user={u}")
+                    if p:
+                        media.add_option(f":rtsp-pwd={p}")
             if hasattr(media, "add_option"):
                 media.add_option(":avcodec-hw=none"); media.add_option(":no-video-title-show")
             self._media = media; self._player.set_media(self._media); self._player.play()
@@ -643,7 +654,9 @@ class Img2GroundModule(QtCore.QObject):
 
     def _on_active_camera_changed(self, ctx) -> None:
         if self.chk_use_active.isChecked() and ctx and getattr(ctx, "rtsp_url", None):
-            self._set_media(ctx.rtsp_url, is_file=False)
+            try: self.ed_rtsp.setText(ctx.rtsp_url)
+            except Exception: pass
+            self._set_media(ctx.rtsp_url, is_file=False, ctx=ctx)
             self._log("IG: playing from active camera")
 
     def _on_stream_mode_changed(self, mode: str) -> None:
@@ -667,7 +680,7 @@ class Img2GroundModule(QtCore.QObject):
             url = getattr(ctx, "rtsp_url", None)
             if not url:
                 self._toast("No RTSP URL from active camera"); return
-            self._set_media(url, is_file=False)
+            self._set_media(url, is_file=False, ctx=ctx)
 
     def _toast(self, msg: str) -> None:
         QtWidgets.QToolTip.showText(QtGui.QCursor.pos(), msg, self._root)

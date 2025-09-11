@@ -505,7 +505,10 @@ class Img2GroundModule(QtCore.QObject):
         self.btn_az_from_ortho.setEnabled(False)
         # update enablement whenever prerequisites change
         QtCore.QTimer.singleShot(500, self._refresh_az_btn_state)
-        self._map.sceneChanged.connect(lambda: QtCore.QTimer.singleShot(0, self._refresh_az_btn_state) if hasattr(self._map, "scene") else None)
+        if hasattr(self._map, "sceneChanged"):
+            self._map.sceneChanged.connect(
+                lambda: QtCore.QTimer.singleShot(0, self._refresh_az_btn_state)
+            )
         self.chk_use_active = QtWidgets.QCheckBox("Use active camera (from RTSP tab)")
         self.chk_use_active.toggled.connect(self.use_active_camera)
         self.btn_refresh_cam = QtWidgets.QPushButton("\uD83D\uDD04 Refresh from live")

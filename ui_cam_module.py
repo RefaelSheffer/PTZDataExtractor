@@ -782,6 +782,11 @@ class CameraModule(QtCore.QObject):
                 bus.signal_camera_changed.emit(ctx)
             except Exception:
                 pass
+            self._publish_ptz_cfg()
+            try:
+                self._start_ptz_meta(host, u, p)
+            except Exception as e:
+                self._log(f"PTZ meta start failed: {e}")
 
     def _stop_player(self):
         try:

@@ -640,9 +640,9 @@ class Img2GroundModule(QtCore.QObject):
             w.setReadOnly(lock)
 
     def _on_active_camera_changed(self, ctx) -> None:
-        if not ctx or not self.chk_use_active.isChecked():
-            return
-        self._apply_active(ctx)
+        if self.chk_use_active.isChecked() and ctx and getattr(ctx, "rtsp_url", None):
+            self._set_media(ctx.rtsp_url, is_file=False)
+            self._log("IG: playing from active camera")
 
     def _on_stream_mode_changed(self, mode: str) -> None:
         ctx = app_state.current_camera

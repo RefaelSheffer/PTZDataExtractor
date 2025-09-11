@@ -200,11 +200,25 @@ class PtzMetaThread:
     Thread ייעודי שמבצע polling ל-PTZ ומחשב נגזרות + HFOV.
     יכול גם לכתוב לקובץ CSV.
     """
-    def __init__(self, host: str, port: int, user: str, pwd: str,
+    def __init__(self, host: Optional[str] = None, port: Optional[int] = None,
+                 user: Optional[str] = None, pwd: Optional[str] = None,
                  profile_index: int = 0, poll_hz: float = 5.0,
-                 sensor_width_mm: float = 6.4, csv_path: Optional[str] = None):
-        self._client = OnvifPTZClient(host, port, user, pwd,
-                                      profile_index=profile_index, poll_hz=poll_hz)
+                 sensor_width_mm: float = 6.4, csv_path: Optional[str] = None,
+                 client: Optional[object] = None):
+        """
+        יצירת שרשור מטה ל-PTZ.
+
+        ניתן לספק לקוח PTZ חלופי שאינו מבוסס ONVIF (למשל CGI או טלמטריה
+        חיצונית). הלקוח צריך לספק מתודות start/stop/last ולקבוע poll_dt.
+        אם לא סופק לקוח כזה, ישמש OnvifPTZClient הרגיל.
+        """
+        if client is None:
+            if host is None or port is None or user is None or pwd is None:
+                raise ValueError("host/port/user/pwd required when client not provided")
+            self._client = OnvifPTZClient(host, port, user, pwd,
+                                          profile_index=profile_index, poll_hz=poll_hz)
+        else:
+            self._client = client
         self._sensor_width_mm = sensor_width_mm
         self._csv_path = csv_path
         self._csv_file = None
@@ -320,4 +334,4 @@ class PtzMetaThread:
                     pass
 
             prev = meta
-            time.sleep(self._client.poll_dt)
+            time.sleep(getattr(self._client, 'poll_dt', 1.0))

@@ -508,7 +508,10 @@ class Img2GroundModule(QtCore.QObject):
         # keep Az button disabled until we have both ortho & pan
         self.btn_az_from_ortho.setEnabled(False)
         # periodic refresh until PAN telemetry arrives
-        self._az_btn_timer = QtCore.QTimer(self._root)
+        # QTimer should use the widget created in this method as parent.
+        # Using self._root here caused an AttributeError during initialization
+        # because self._root isn't set until after _build_ui returns.
+        self._az_btn_timer = QtCore.QTimer(w)
         self._az_btn_timer.setInterval(800)
         self._az_btn_timer.timeout.connect(self._refresh_az_btn_state)
         self._az_btn_timer.start()

@@ -395,7 +395,11 @@ class CameraModule(QtCore.QObject):
                         urls.append(f"rtsp://{host}:{port}{path}")
 
         for url in urls:
+            tcp = True
             ok, msg = probe_rtsp(ffprobe, url, user, pwd, prefer_tcp=True, timeout_ms=3500)
+            if not ok and "Timeout" in msg:
+                ok, msg = probe_rtsp(ffprobe, url, user, pwd, prefer_tcp=False, timeout_ms=3500)
+                tcp = False
             self._log(f"Probe {url} -> {msg}")
             if ok:
                 h, p, pa = sanitize_host(url)
@@ -403,7 +407,7 @@ class CameraModule(QtCore.QObject):
                     self.rtsp_port.setValue(p)
                 if pa:
                     self.rtsp_path.setText(pa)
-                self._start_player(url, force_tcp=True, user=user, pwd=pwd)
+                self._start_player(url, force_tcp=tcp, user=user, pwd=pwd)
                 # פרסום הגדרות PTZ ללשונית Image→Ground
                 self._publish_ptz_cfg()
                 QtWidgets.QMessageBox.information(self._root, "Auto-try", f"Connected: {url}")

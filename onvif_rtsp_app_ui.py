@@ -908,6 +908,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "rtsp_path": self.rtsp_path.text().strip(),
             "onvif_port": self.onvif_port.value(),
             "force_tcp": self.force_tcp.isChecked(),
+            "hevc_guard_ms": self.hevc_guard.value(),
             "ptz_cgi_port": self.ptz_cgi_port.value(),
             "ptz_cgi_channel": self.ptz_cgi_channel.value(),
             "ptz_cgi_poll_hz": self.ptz_cgi_poll.value(),
@@ -929,6 +930,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rtsp_path.setText(p.get("rtsp_path","/cam/realmonitor?channel=1&subtype=1"))
         self.onvif_port.setValue(int(p.get("onvif_port",80)))
         self.force_tcp.setChecked(bool(p.get("force_tcp",True)))
+        self.hevc_guard.setValue(int(p.get("hevc_guard_ms", self.hevc_guard_ms)))
+        self.hevc_guard_ms = self.hevc_guard.value()
         self.ptz_cgi_port.setValue(int(p.get("ptz_cgi_port", self._cfg.get("ptz_cgi_port", 80))))
         self.ptz_cgi_channel.setValue(int(p.get("ptz_cgi_channel", self._cfg.get("ptz_cgi_channel", 1))))
         self.ptz_cgi_poll.setValue(float(p.get("ptz_cgi_poll_hz", self._cfg.get("ptz_cgi_poll_hz", 5.0))))

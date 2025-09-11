@@ -2,6 +2,22 @@
 
 from typing import Optional, Dict
 
+from PySide6 import QtCore
+
+
+class _Signals(QtCore.QObject):
+    """Qt signals shared across modules."""
+
+    signal_camera_changed = QtCore.Signal(object)
+    signal_stream_mode_changed = QtCore.Signal(str)
+
+
+_signals = _Signals()
+
+# Expose signals at module level for convenience
+signal_camera_changed = _signals.signal_camera_changed
+signal_stream_mode_changed = _signals.signal_stream_mode_changed
+
 # אחרון DTM/אורתופוטו שנטענו (לשימוש בין הטאבים)
 dtm_path: Optional[str] = None
 orthophoto_path: Optional[str] = None

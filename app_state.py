@@ -36,11 +36,13 @@ class LiveCameraContext:
     model: str | None
     intrinsics: Optional[Intrinsics]
     distortion: Optional[Distortion]
+    mock_file: str | None = None
 
 
 class AppState:
     def __init__(self) -> None:
         self.current_camera: Optional[LiveCameraContext] = None
+        self.stream_mode: str = "online"
 
 
 app_state = AppState()

@@ -25,7 +25,6 @@ from any_ptz_client import AnyPTZClient
 from ui_common import VlcVideoWidget, default_vlc_path, open_folder, redact
 import shared_state  # <<< לשיתוף הגדרות ה-PTZ עם מודולים אחרים
 from app_state import app_state, LiveCameraContext, load_calibration
-from event_bus import bus
 
 APP_DIR = Path(__file__).resolve().parent
 PROFILES_PATH = APP_DIR / "profiles.json"  # module-specific profiles
@@ -69,6 +68,8 @@ class CameraModule(QtCore.QObject):
             self._cfg.get("silence_native_stderr", self._cfg.get("suppress_stderr", False))
         )
         self._root = self._build_ui()
+        self.mode.currentIndexChanged.connect(self._on_mode_changed)
+        self._on_mode_changed(self.mode.currentIndex())
         self._hevc_guard_tried = False
         self._last_codec = ""
         self._ptz_meta: Optional[PtzMetaThread] = None
@@ -324,6 +325,14 @@ class CameraModule(QtCore.QObject):
 
         return root
 
+    def _on_mode_changed(self, idx: int) -> None:
+        mode = "mockup" if idx == 0 else "online"
+        app_state.stream_mode = mode
+        try:
+            shared_state.signal_stream_mode_changed.emit(mode)
+        except Exception:
+            pass
+
     # ===== Mock =====
     def _choose_mp4(self):
         dialog = QtWidgets.QFileDialog(self._root, "Choose MP4")
@@ -379,6 +388,7 @@ class CameraModule(QtCore.QObject):
         if not url:
             QtWidgets.QMessageBox.warning(self._root, "No RTSP URL", "Start mock server first.")
             return
+        mock_path = self.mock_file.text().strip()
         self._start_player(url)
 
         # --- publish + set Active Camera ---
@@ -403,7 +413,7 @@ class CameraModule(QtCore.QObject):
 
         self._publish_ptz_cfg()
         self._start_ptz_meta(h, user, pwd)
-        self._update_live_context(url, h, tcp, codec, width, height, fps, user, pwd)
+        self._update_live_context(url, h, tcp, codec, width, height, fps, user, pwd, mock_file=mock_path)
         self._log("Active camera set from Cameras tab")
 
     # ===== Real =====
@@ -1174,7 +1184,8 @@ class CameraModule(QtCore.QObject):
 
     def _update_live_context(self, url: str, host: str, tcp: bool, codec: str,
                               width: Optional[int], height: Optional[int],
-                              fps: Optional[float], user: str, pwd: str) -> None:
+                              fps: Optional[float], user: str, pwd: str,
+                              mock_file: Optional[str] = None) -> None:
         brand = model = serial = None
         if ONVIFCamera is not None:
             try:
@@ -1203,9 +1214,10 @@ class CameraModule(QtCore.QObject):
             model=model,
             intrinsics=intr,
             distortion=dist,
+            mock_file=mock_file,
         )
         app_state.current_camera = ctx
         try:
-            bus.signal_camera_changed.emit(ctx)
+            shared_state.signal_camera_changed.emit(ctx)
         except Exception:
             pass

@@ -26,7 +26,6 @@ from ui_common import VlcVideoWidget
 from ui_calibration_module import HorizonAzimuthCalibrationDialog
 import shared_state
 from app_state import app_state
-from event_bus import bus
 
 from any_ptz_client import AnyPTZClient
 from onvif_ptz import PTZReading
@@ -418,7 +417,12 @@ class Img2GroundModule(QtCore.QObject):
 
         self._t = QtCore.QTimer(self._root); self._t.timeout.connect(self._update_metrics); self._t.start(800)
         self._ptz_timer = QtCore.QTimer(self._root); self._ptz_timer.timeout.connect(self._poll_ptz_ui); self._ptz_timer.start(400)
-        bus.signal_camera_changed.connect(self._on_active_camera_changed)
+        self.chk_use_active.setChecked(True)
+        self.btn_play_rtsp.hide(); self.btn_play_file.hide()
+        shared_state.signal_camera_changed.connect(self._on_active_camera_changed)
+        shared_state.signal_stream_mode_changed.connect(self._on_stream_mode_changed)
+        if app_state.current_camera:
+            self._apply_active(app_state.current_camera)
 
     def widget(self) -> QtWidgets.QWidget:
         return self._root
@@ -627,20 +631,42 @@ class Img2GroundModule(QtCore.QObject):
             QtWidgets.QMessageBox.warning(None, "VLC", f"Failed to play:\n{e}")
             self._log(f"_set_media failed: {e}")
 
+    def _toast(self, msg: str) -> None:
+        QtWidgets.QToolTip.showText(QtGui.QCursor.pos(), msg, self._root)
+        self._log(msg)
+
     def _update_lock_cam(self):
         lock = self.chk_lock_cam.isChecked()
         for w in (self.fx, self.fy, self.cx, self.cy, self.k1, self.k2, self.p1, self.p2, self.k3):
             w.setReadOnly(lock)
 
     def _on_active_camera_changed(self, ctx) -> None:
-        if not ctx:
+        if not ctx or not self.chk_use_active.isChecked():
             return
-        self.ed_rtsp.setText(ctx.rtsp_url or "")
-        if self.chk_use_active.isChecked():
-            self.use_active_camera(force=True)
-            if ctx.rtsp_url:
-                self._set_media(ctx.rtsp_url, is_file=False)
-                self._log("Image→Ground: playing from active camera")
+        self._apply_active(ctx)
+
+    def _on_stream_mode_changed(self, mode) -> None:
+        ctx = app_state.current_camera
+        if ctx and self.chk_use_active.isChecked():
+            self._apply_active(ctx)
+
+    def _apply_active(self, ctx) -> None:
+        self.use_active_camera(force=True)
+        mode = getattr(app_state, "stream_mode", "online")
+        if mode == "mockup":
+            path = getattr(ctx, "mock_file", None)
+            if not path:
+                self._toast("No mockup file defined")
+                return
+            self._set_media(path, is_file=True)
+            self._log("IG: playing mockup")
+        else:
+            url = ctx.rtsp_url
+            if not url:
+                self._toast("No RTSP URL from active camera")
+                return
+            self._set_media(url, is_file=False)
+            self._log("IG: playing from active camera")
 
     def use_active_camera(self, force: bool = False):
         if not force and not self.chk_use_active.isChecked():

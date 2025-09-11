@@ -119,7 +119,14 @@ class UserTab(QtWidgets.QWidget):
         media = self._vlc.media_new(cam.rtsp_url)
         player = vw.player()
         player.set_media(media)
-        player.play()
+        # Delay playback slightly so that the underlying widget is fully
+        # realized and the native window handle is valid for VLC. Starting
+        # the player too early can result in audio only or a black frame on
+        # some platforms (especially Windows) because the video output has
+        # not yet been bound. Using a singleShot timer ensures the call
+        # happens after the current event loop iteration when the widget has
+        # been shown.
+        QtCore.QTimer.singleShot(100, player.play)
 
     # ------------------------------------------------------------------
     # Layers

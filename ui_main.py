@@ -11,6 +11,7 @@ from ui_settings_module import SettingsModule
 from ui_cam_module import CameraModule
 from ui_prep_module import PrepModule
 from ui_img2ground_module import Img2GroundModule
+from ui_monitor_module import MonitorModule
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -69,6 +70,10 @@ class MainWindow(QtWidgets.QMainWindow):
         i2g = Img2GroundModule(self.vlc_instance, log_func=self.log)
         self._modules.append(i2g)
         self.tabs.addTab(i2g.widget(), i2g.title)
+
+        monitor = MonitorModule(self.vlc_instance, log_func=self.log)
+        self._modules.append(monitor)
+        self.tabs.addTab(monitor.widget(), monitor.title)
 
     # ------- global logging -------
     @QtCore.Slot(str)

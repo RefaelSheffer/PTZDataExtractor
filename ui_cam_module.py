@@ -758,6 +758,31 @@ class CameraModule(QtCore.QObject):
         if self.hevc_guard_ms and not self._hevc_guard_tried:
             QtCore.QTimer.singleShot(self.hevc_guard_ms, self._hevc_guard_check)
 
+        # promote preview to active camera (RTSP only)
+        if url.lower().startswith("rtsp://"):
+            host = parse_host_from_rtsp(url) or ""
+            m = re.match(r"rtsp://(?:(?P<u>[^:@/]*)(?::(?P<p>[^@/]*))?@)?", url)
+            user_url = m.group("u") if m and m.group("u") else ""
+            pwd_url = m.group("p") if m and m.group("p") else ""
+            u = user or user_url
+            p = pwd or pwd_url
+            ctx = LiveCameraContext(
+                online=True,
+                host=host,
+                rtsp_url=url,
+                user=u or None,
+                pwd=p or None,
+            )
+            app_state.current_camera = ctx
+            try:
+                shared_state.signal_camera_changed.emit(ctx)
+            except Exception:
+                pass
+            try:
+                bus.signal_camera_changed.emit(ctx)
+            except Exception:
+                pass
+
     def _stop_player(self):
         try:
             self.video.player().stop()
@@ -1317,7 +1342,10 @@ class CameraModule(QtCore.QObject):
         )
         app_state.current_camera = ctx
         try:
-            bus.signal_camera_changed.emit(ctx)
             shared_state.signal_camera_changed.emit(ctx)
+        except Exception:
+            pass
+        try:
+            bus.signal_camera_changed.emit(ctx)
         except Exception:
             pass

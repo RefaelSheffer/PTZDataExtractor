@@ -489,13 +489,13 @@ class Img2GroundModule(QtCore.QObject):
         # simple calibration group
         grp_simple = QtWidgets.QGroupBox("Calibration (Simple)")
         gls = QtWidgets.QHBoxLayout(grp_simple)
-        self.btn_level_horizon = QtWidgets.QPushButton("Level from Horizon…")
+        self.btn_level_horizon = QtWidgets.QPushButton("Level from horizon…")
         self.btn_level_horizon.setToolTip("לחץ 2 נק’ על קו האופק בתמונה כדי לאפס roll/pitch.")
         self.btn_level_horizon.clicked.connect(self._calibrate_from_horizon)
-        self.btn_az_from_map = QtWidgets.QPushButton("Azimuth from Map…")
-        self.btn_az_from_map.setToolTip("בחר נקודה/ות באורתו שהמצלמה מביטה אליהן. ההיסט אזימוט יחושב מול ה-pan החי.")
-        self.btn_az_from_map.clicked.connect(self._calibrate_azimuth_from_map)
-        gls.addWidget(self.btn_level_horizon); gls.addWidget(self.btn_az_from_map)
+        self.btn_az_from_ortho = QtWidgets.QPushButton("Azimuth from ortho…")
+        self.btn_az_from_ortho.setToolTip("בחר נקודה/ות באורתו שהמצלמה מביטה אליהן. ההיסט אזימוט יחושב מול ה-pan החי.")
+        self.btn_az_from_ortho.clicked.connect(self._calibrate_azimuth_from_ortho)
+        gls.addWidget(self.btn_level_horizon); gls.addWidget(self.btn_az_from_ortho)
         g.addWidget(grp_simple, r, 0, 1, 8); r += 1
 
         # camera model / calibration
@@ -907,11 +907,9 @@ class Img2GroundModule(QtCore.QObject):
 
     # ----- simple calibration helpers -----
     def _calibrate_from_horizon(self):
-        if self._bundle is None:
-            QtWidgets.QMessageBox.information(None, "Horizon", "Load a bundle first."); return
         pm = self.video.grab()
         if pm.isNull():
-            QtWidgets.QMessageBox.information(None, "Horizon", "Failed to capture frame."); return
+            QtWidgets.QMessageBox.information(None, "Level from horizon", "Failed to capture frame."); return
         img = pm.toImage()
         dlg = HorizonDialog(img, self._root)
         if dlg.exec() != QtWidgets.QDialog.Accepted:
@@ -922,26 +920,28 @@ class Img2GroundModule(QtCore.QObject):
         (x1, y1), (x2, y2) = pts
         width = abs(x2 - x1)
         if width < 1e-6:
-            QtWidgets.QMessageBox.information(None, "Horizon", "Points too close."); return
+            QtWidgets.QMessageBox.information(None, "Level from horizon", "Points too close."); return
         roll = roll_error_from_horizon(y1, y2, width)
         y_hor = 0.5 * (y1 + y2)
         fy = self.fy.value() or 1.0
         cy = self.cy.value()
         pitch = math.degrees(math.atan((cy - y_hor) / fy))
-        pose_d = self._bundle.setdefault("pose", {})
-        cur_roll = pose_d.get("roll_deg", pose_d.get("roll", 0.0))
-        pose_d["roll_deg"] = cur_roll - roll
-        pose_d["pitch_deg"] = pitch
-        self.lbl_status.setText(f"Level applied: roll={pose_d['roll_deg']:.2f}°, pitch={pitch:.2f}°")
+        ctx = getattr(app_state, "current_camera", None)
+        if ctx is not None:
+            setattr(ctx, "roll_offset_deg", getattr(ctx, "roll_offset_deg", 0.0) - roll)
+            setattr(ctx, "pitch_offset_deg", getattr(ctx, "pitch_offset_deg", 0.0) + pitch)
+        self.lbl_status.setText(f"Level applied: roll_offset={-roll:.2f}°, pitch≈{pitch:.2f}°")
+        QtWidgets.QMessageBox.information(None, "Level from horizon",
+            f"Applied offsets:\nRoll: {-roll:.2f}°\nPitch≈ {pitch:.2f}°")
 
-    def _calibrate_azimuth_from_map(self):
+    def _calibrate_azimuth_from_ortho(self):
         if self._ortho_layer is None:
-            QtWidgets.QMessageBox.information(None, "Azimuth", "Load an orthophoto first."); return
+            QtWidgets.QMessageBox.information(None, "Azimuth from ortho", "Load an orthophoto first."); return
         if self._ptz_last.pan_deg is None:
-            QtWidgets.QMessageBox.information(None, "Azimuth", "PTZ not connected (no pan)."); return
+            QtWidgets.QMessageBox.information(None, "Azimuth from ortho", "PTZ not connected (no pan)."); return
         cam_proj = getattr(shared_state, "camera_proj", None)
         if not cam_proj:
-            QtWidgets.QMessageBox.information(None, "Azimuth", "Camera position not set in Preparation."); return
+            QtWidgets.QMessageBox.information(None, "Azimuth from ortho", "Camera position not set in Preparation."); return
         dlg = PointsDialog(self._map, self._root)
         if dlg.exec() != QtWidgets.QDialog.Accepted:
             return
@@ -956,13 +956,18 @@ class Img2GroundModule(QtCore.QObject):
                 dx = X - Xc; dy = Y - Yc
                 yaws.append(_normalize_angle_deg(math.degrees(math.atan2(dx, dy))))
         except Exception as e:
-            QtWidgets.QMessageBox.warning(None, "Azimuth", f"scene_to_geo failed: {e}"); return
+            QtWidgets.QMessageBox.warning(None, "Azimuth from ortho", f"scene_to_geo failed: {e}"); return
         s = sum(math.sin(math.radians(a)) for a in yaws)
         c = sum(math.cos(math.radians(a)) for a in yaws)
         yaw_avg = math.degrees(math.atan2(s, c))
         pan_now = self._ptz_last.pan_deg or 0.0
         self._yaw_offset_deg = _normalize_angle_deg(yaw_avg - pan_now)
+        ctx = getattr(app_state, "current_camera", None)
+        if ctx is not None:
+            setattr(ctx, "yaw_offset_deg", getattr(ctx, "yaw_offset_deg", 0.0) + self._yaw_offset_deg)
         self.lbl_status.setText(f"Azimuth offset={self._yaw_offset_deg:.2f}° (avg yaw {yaw_avg:.2f}°)")
+        QtWidgets.QMessageBox.information(None, "Azimuth from ortho",
+            f"Bearing to point: {yaw_avg:.2f}°\nPan now: {pan_now:.2f}°\nApplied yaw offset: {self._yaw_offset_deg:.2f}°")
         pose_d = self._bundle.get("pose") if self._bundle else None
         georef = GeoRef.from_dict(self._bundle["georef"]) if self._bundle else None
         if pose_d and georef:

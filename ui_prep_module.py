@@ -52,6 +52,26 @@ class PrepModule(QtCore.QObject):
         lay.addWidget(self.btn_read_epsg, r, 2)
         lay.addWidget(self.btn_center_origin, r, 3); r += 1
 
+        # Calibration and lighting files
+        lay.addWidget(QtWidgets.QLabel("<b>Calibration</b>"), r, 0, 1, 4); r += 1
+        self.ed_calib_images = QtWidgets.QLineEdit()
+        btn_calib_imgs = QtWidgets.QPushButton("Browse images…"); btn_calib_imgs.clicked.connect(self._browse_calib_images)
+        lay.addWidget(QtWidgets.QLabel("Images folder:"), r, 0)
+        lay.addWidget(self.ed_calib_images, r, 1, 1, 2)
+        lay.addWidget(btn_calib_imgs, r, 3); r += 1
+
+        self.ed_calib_params = QtWidgets.QLineEdit()
+        btn_calib_params = QtWidgets.QPushButton("Browse params…"); btn_calib_params.clicked.connect(self._browse_calib_params)
+        lay.addWidget(QtWidgets.QLabel("Params file:"), r, 0)
+        lay.addWidget(self.ed_calib_params, r, 1, 1, 2)
+        lay.addWidget(btn_calib_params, r, 3); r += 1
+
+        self.ed_lights = QtWidgets.QLineEdit()
+        btn_lights = QtWidgets.QPushButton("Browse lights…"); btn_lights.clicked.connect(self._browse_lights)
+        lay.addWidget(QtWidgets.QLabel("Lights file:"), r, 0)
+        lay.addWidget(self.ed_lights, r, 1, 1, 2)
+        lay.addWidget(btn_lights, r, 3); r += 1
+
         # Intrinsics
         lay.addWidget(QtWidgets.QLabel("<b>Camera intrinsics</b>"), r, 0, 1, 4); r += 1
         self.spn_w = QtWidgets.QSpinBox(); self.spn_w.setRange(16, 7680); self.spn_w.setValue(1280)
@@ -174,6 +194,21 @@ class PrepModule(QtCore.QObject):
             d.close()
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "DTM", f"Failed to set origin: {e}")
+
+    def _browse_calib_images(self):
+        path = QtWidgets.QFileDialog.getExistingDirectory(None, "Select calibration images", self.ed_calib_images.text() or "")
+        if path:
+            self.ed_calib_images.setText(path)
+
+    def _browse_calib_params(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(None, "Select calibration params", "", "All files (*.*)")
+        if path:
+            self.ed_calib_params.setText(path)
+
+    def _browse_lights(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(None, "Select lights file", "", "All files (*.*)")
+        if path:
+            self.ed_lights.setText(path)
 
     def _ensure_base_map(self):
         try:

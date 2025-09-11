@@ -504,7 +504,10 @@ class CameraModule(QtCore.QObject):
             return
 
         # ONVIF → RTSP
-        ok, res = onvif_get_rtsp_uri(h, int(self.onvif_port.value()), user, pwd)
+        port = int(self.onvif_port.value())
+        ok, res = onvif_get_rtsp_uri(h, port, user, pwd)
+        if not ok and port != 80:
+            ok, res = onvif_get_rtsp_uri(h, 80, user, pwd)
         if not ok:
             QtWidgets.QMessageBox.critical(self._root, "ONVIF error", res)
             return

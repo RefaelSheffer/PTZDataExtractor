@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Literal, Tuple
+from typing import Optional, Literal, Tuple, Dict, Any
 import json
 
 @dataclass
@@ -36,6 +36,8 @@ class LiveCameraContext:
     model: str | None
     intrinsics: Optional[Intrinsics]
     distortion: Optional[Distortion]
+    layers: Optional[Dict[str, Any]] = None
+    calibration: Optional[Dict[str, float]] = None
 
 
 class AppState:

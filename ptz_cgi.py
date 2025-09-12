@@ -53,9 +53,14 @@ class PtzCgiThread:
         self._csv_path = csv_path
 
         proto = "https" if https else "http"
-        self._url = f"{proto}://{host}:{port}/cgi-bin/ptz.cgi?action=getStatus"
+        urls = [
+            f"{proto}://{host}:{port}/cgi-bin/ptz.cgi?action=getStatus",
+            f"{proto}://{host}:{port}/ptz.cgi?action=getStatus",
+        ]
         if channel is not None:
-            self._url += f"&channel={int(channel)}"
+            urls = [u + f"&channel={int(channel)}" for u in urls]
+        self._urls = urls
+        self._url_index = 0
 
         self._opener = None
         self._last = PTZReading()
@@ -91,20 +96,26 @@ class PtzCgiThread:
     # ----- internal -----
     def _build_opener(self) -> None:
         mgr = HTTPPasswordMgrWithDefaultRealm()
-        mgr.add_password(None, self._url, self.user, self.pwd)
+        for url in self._urls:
+            mgr.add_password(None, url, self.user, self.pwd)
         handler = HTTPBasicAuthHandler(mgr)
         self._opener = build_opener(handler)
 
     def _fetch_text(self) -> Optional[str]:
         if not self._opener:
             return None
-        try:
-            with self._opener.open(Request(self._url), timeout=2.0) as resp:
-                return resp.read().decode("utf-8", errors="ignore")
-        except URLError:
-            return None
-        except Exception:
-            return None
+        for i in range(len(self._urls)):
+            idx = (self._url_index + i) % len(self._urls)
+            url = self._urls[idx]
+            try:
+                with self._opener.open(Request(url), timeout=2.0) as resp:
+                    self._url_index = idx
+                    return resp.read().decode("utf-8", errors="ignore")
+            except URLError:
+                continue
+            except Exception:
+                continue
+        return None
 
     def _normalize_zoom(self, z: Optional[float]) -> Optional[float]:
         if z is None:

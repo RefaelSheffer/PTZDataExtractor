@@ -78,11 +78,10 @@ class UserTab(QtWidgets.QWidget):
         self.act_copy.triggered.connect(self.on_copy_gmaps)
         self.act_qr.triggered.connect(self.on_make_qr)
         bus.signal_camera_changed.connect(self._on_active_camera_changed)
-        shared_state.signal_camera_changed.connect(
-            lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None))
-        )
         shared_state.signal_layers_changed.connect(self._on_layers_changed)
+        shared_state.signal_camera_changed.connect(self._apply_current_layers)
         self.mount_video_preview()
+        self._apply_current_layers()
         if app_state.current_camera:
             self._on_active_camera_changed(app_state.current_camera)
 
@@ -166,13 +165,19 @@ class UserTab(QtWidgets.QWidget):
             self._fill_calibration_ui(calib)
 
     def _on_layers_changed(self, alias: str, layers: dict) -> None:
-        if alias == getattr(app_state.current_camera, "alias", None):
-            self._apply_layers(layers)
-
-    def _apply_layers_for(self, alias: str | None) -> None:
-        if not alias:
+        cur = getattr(app_state, "current_camera", None)
+        if not cur:
             return
-        layers = shared_state.layers_for_camera.get(alias)
+        if alias and getattr(cur, "alias", None) and alias != cur.alias:
+            return
+        self._apply_layers(layers)
+
+    def _apply_current_layers(self, *_):
+        cur = getattr(app_state, "current_camera", None)
+        if not cur:
+            return
+        alias = getattr(cur, "alias", None) or "(default)"
+        layers = shared_state.layers_for_camera.get(alias) or {}
         if layers:
             self._apply_layers(layers)
 

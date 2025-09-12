@@ -923,7 +923,6 @@ class Img2GroundModule(QtCore.QObject):
         dtm = self._resolve_path(layers.get("dtm"))
         if ortho:
             self._load_orthophoto(ortho)
-            self._ortho_layer = getattr(self._map, "ortho_layer", None) or self._ortho_layer or True
         if dtm:
             try:
                 if self._dtm is not None:
@@ -1141,6 +1140,13 @@ class Img2GroundModule(QtCore.QObject):
             return float(ctx.pan_deg)
         return None
 
+    def _ready_flags(self) -> tuple[bool, bool, bool, bool]:
+        has_ortho = bool(self._ortho_layer)
+        has_xy = bool(getattr(shared_state, "camera_proj", None))
+        has_pan = self._get_pan_now() is not None
+        has_intr = self.fx.value() != 0.0 and self.fy.value() != 0.0
+        return has_ortho, has_xy, has_pan, has_intr
+
     def _set_ready_lbl(self, lbl: QtWidgets.QLabel, ok: bool, text: str) -> None:
         icon = "\u2713" if ok else "\u2717"
         color = "#0a0" if ok else "#a00"
@@ -1148,10 +1154,7 @@ class Img2GroundModule(QtCore.QObject):
         lbl.setStyleSheet(f"color: {color};")
 
     def _refresh_readiness(self) -> None:
-        has_ortho = self._ortho_layer is not None
-        has_xy = getattr(shared_state, "camera_proj", None) is not None
-        has_pan = self._get_pan_now() is not None
-        has_intr = self.fx.value() != 0.0 and self.fy.value() != 0.0
+        has_ortho, has_xy, has_pan, has_intr = self._ready_flags()
         self._set_ready_lbl(self._lbl_ready_ortho, has_ortho, "Ortho")
         self._set_ready_lbl(self._lbl_ready_cam, has_xy, "Camera XY")
         self._set_ready_lbl(self._lbl_ready_pan, has_pan, "PTZ pan")
@@ -1160,9 +1163,7 @@ class Img2GroundModule(QtCore.QObject):
         self.btn_fov_cal.setEnabled(all_ok)
 
     def _refresh_az_btn_state(self) -> None:
-        has_ortho = bool(self._ortho_layer)
-        has_xy = bool(getattr(shared_state, "camera_proj", None))
-        has_pan = self._get_pan_now() is not None
+        has_ortho, has_xy, has_pan, _ = self._ready_flags()
         enabled = has_ortho and has_xy and has_pan
         self.btn_az_from_ortho.setEnabled(enabled)
         tip = self._az_tip_ready if enabled else self._az_tip_wait

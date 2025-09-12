@@ -437,7 +437,7 @@ class Img2GroundModule(QtCore.QObject):
         )
         shared_state.signal_layers_changed.connect(self._on_layers_changed)
         bus.signal_camera_changed.connect(lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None)))
-        bus.signal_ortho_changed.connect(self.apply_ortho)
+        bus.signal_ortho_changed.connect(self._on_ortho_changed)
         if app_state.current_camera:
             self.use_active_camera(force=True)
         self._on_stream_mode_changed(getattr(app_state, "stream_mode", "online"))
@@ -852,30 +852,19 @@ class Img2GroundModule(QtCore.QObject):
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 
-    def _load_orthophoto(self, path: Optional[str] = None, *, broadcast: bool = True):
+    def _load_orthophoto(self, path: Optional[str] = None) -> None:
         if not path:
-            path, _ = QtWidgets.QFileDialog.getOpenFileName(None, "Open Orthophoto (GeoTIFF)", "",
-                                                            "GeoTIFF (*.tif *.tiff);;All files (*.*)")
-            if not path:
-                return
+            self._open_prep_tab()
+            return
         try:
             layer = RasterLayer(path, max_size=2048)
             self.apply_ortho(layer)
-            if broadcast:
-                self._update_shared_layers()
-                bus.signal_ortho_changed.emit(layer)
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 
-    def _update_shared_layers(self) -> None:
-        alias = getattr(app_state.current_camera, "alias", "default")
-        ortho = getattr(self._ortho_layer, "path", None)
-        dtm = getattr(self, "_dtm_path", None)
-        layers = {"ortho": ortho, "dtm": dtm, "srs": None}
-        if app_state.current_camera:
-            app_state.current_camera.layers = layers
-        shared_state.layers_for_camera[alias] = layers
-        shared_state.signal_layers_changed.emit(alias, layers)
+    def _on_ortho_changed(self, alias: str, layer) -> None:
+        if alias == getattr(app_state.current_camera, "alias", None):
+            self.apply_ortho(layer)
 
     def _on_layers_changed(self, alias: str, layers: dict) -> None:
         if alias == getattr(app_state.current_camera, "alias", None):
@@ -896,7 +885,7 @@ class Img2GroundModule(QtCore.QObject):
         ortho = self._resolve_path(layers.get("ortho"))
         dtm = self._resolve_path(layers.get("dtm"))
         if ortho:
-            self._load_orthophoto(ortho, broadcast=False)
+            self._load_orthophoto(ortho)
         if dtm:
             try:
                 if self._dtm is not None:
@@ -958,7 +947,6 @@ class Img2GroundModule(QtCore.QObject):
             self._dtm = DTM(model_path)
             self._dtm_path = model_path
             self.lbl_bundle.setText(f"Loaded: {name}"); self._log(f"Bundle loaded: {name}")
-            self._update_shared_layers()
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Bundle", f"Failed to load bundle: {e}")
 

@@ -57,11 +57,13 @@ class UserTab(QtWidgets.QWidget):
         self.dtm_edit = QtWidgets.QLineEdit()
         self.ortho_edit = QtWidgets.QLineEdit()
         btn_load = QtWidgets.QPushButton("Override…")
+        btn_load_ortho = QtWidgets.QPushButton("Load Orthophoto…")
         hrow = QtWidgets.QHBoxLayout()
         hrow.addWidget(QtWidgets.QLabel("DTM:"))
         hrow.addWidget(self.dtm_edit, 1)
         hrow.addWidget(QtWidgets.QLabel("Ortho:"))
         hrow.addWidget(self.ortho_edit, 1)
+        hrow.addWidget(btn_load_ortho)
         hrow.addWidget(btn_load)
 
         # ----- video + map -----
@@ -90,6 +92,7 @@ class UserTab(QtWidgets.QWidget):
         self.act_copy.triggered.connect(self.on_copy_gmaps)
         self.act_qr.triggered.connect(self.on_make_qr)
         btn_load.clicked.connect(self.on_load_layers)
+        btn_load_ortho.clicked.connect(self.on_load_ortho)
 
         bus.signal_camera_changed.connect(self._on_active_camera_changed)
         shared_state.signal_camera_changed.connect(
@@ -169,8 +172,19 @@ class UserTab(QtWidgets.QWidget):
             self._toast("Layers loaded")
             if broadcast:
                 self._update_shared_layers()
+                if self._ortho_layer is not None:
+                    bus.signal_ortho_changed.emit(self._ortho_layer)
         except Exception as e:  # pragma: no cover - UI feedback
             self._toast(f"Layer load failed: {e}", error=True)
+
+    def on_load_ortho(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Open Orthophoto (GeoTIFF)", "", "GeoTIFF (*.tif *.tiff);;All files (*.*)"
+        )
+        if not path:
+            return
+        self.ortho_edit.setText(path)
+        self.on_load_layers()
 
     def _on_active_camera_changed(self, ctx):
         if not ctx:

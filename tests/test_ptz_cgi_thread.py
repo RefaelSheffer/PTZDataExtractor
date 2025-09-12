@@ -26,4 +26,5 @@ def test_ptz_cgi_thread_shared_state():
     assert meta is not None
     assert meta["pan_deg"] == 1.0
     assert meta["focus_pos"] == 3.0
+    assert meta.get("cgi_last", {}).get("pan_deg") == 1.0
     assert th.last().focus_pos == 3.0

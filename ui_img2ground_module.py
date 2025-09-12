@@ -1039,42 +1039,42 @@ class Img2GroundModule(QtCore.QObject):
 
     # ----- FOV calib via PTZ -----
     def _get_pan_now(self):
-        # 1) מקומי (אם התחברנו ל-PTZ מהטאב הזה)
-        try:
-            ptz = getattr(self, "_ptz", None) or getattr(self, "_ptz_meta", None)
-            if ptz:
-                r = ptz.last()
-                if r and getattr(r, "pan_deg", None) is not None:
-                    return float(r.pan_deg)
-        except Exception:
-            pass
-        if getattr(self, "_ptz_last", None) and getattr(self._ptz_last, "pan_deg", None) is not None:
+        # 1) מקומי (אם יש לקוח PTZ שרץ כאן)
+        if (
+            getattr(self, "_ptz_last", None)
+            and getattr(self._ptz_last, "pan_deg", None) is not None
+        ):
             return float(self._ptz_last.pan_deg)
 
-        # 2) גלובלי – יכול להיות dict או אובייקט עם last()
+        # 2) גלובלי: יכול להיות אובייקט עם last(), או dict ממוזג של CGI/ONVIF
         meta = getattr(app_state, "ptz_meta", None)
         if meta is not None:
-            try:
-                last = meta.last() if hasattr(meta, "last") else meta
-            except Exception:
-                last = meta
-            try:
-                pan = (last.get("pan_deg") if isinstance(last, dict) else getattr(last, "pan_deg", None))
+            for cand in (
+                getattr(meta, "cgi_last", None),
+                getattr(meta, "onvif_last", None),
+                meta.last() if hasattr(meta, "last") else meta,
+            ):
+                if cand is None:
+                    continue
+                pan = cand.get("pan_deg") if isinstance(cand, dict) else getattr(
+                    cand, "pan_deg", None
+                )
                 if pan is not None:
-                    return float(pan)
-            except Exception:
-                pass
+                    try:
+                        return float(pan)
+                    except Exception:
+                        pass
 
-        # 3) מה-context (אם נשמר שם)
+        # 3) מה־context (אם שמרת שם ערכים)
         ctx = getattr(app_state, "current_camera", None)
         if ctx and getattr(ctx, "pan_deg", None) is not None:
             return float(ctx.pan_deg)
         return None
 
     def _refresh_az_btn_state(self):
-        has_ortho = (self._ortho_layer is not None)
-        has_pan   = (self._get_pan_now() is not None)
-        self.btn_az_from_ortho.setEnabled(has_ortho and has_pan)
+        self.btn_az_from_ortho.setEnabled(
+            self._ortho_layer is not None and self._get_pan_now() is not None
+        )
 
     def _calibrate_fov_with_ptz(self):
         """Calibrate yaw offset and FOV using PTZ telemetry.

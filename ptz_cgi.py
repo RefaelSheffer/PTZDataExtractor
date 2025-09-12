@@ -56,6 +56,8 @@ class PtzCgiThread:
         urls = [
             f"{proto}://{host}:{port}/cgi-bin/ptz.cgi?action=getStatus",
             f"{proto}://{host}:{port}/ptz.cgi?action=getStatus",
+            f"{proto}://{host}:{port}/cgi-bin/ptz?action=getStatus",
+            f"{proto}://{host}:{port}/ptz?action=getStatus",
         ]
         if channel is not None:
             urls = [u + f"&channel={int(channel)}" for u in urls]
@@ -133,6 +135,23 @@ class PtzCgiThread:
             return z / 1024.0
         return None
 
+    def _to_deg(self, v, kind: str = "pan") -> Optional[float]:
+        try:
+            x = float(v)
+        except Exception:
+            return None
+        if -360.0 <= x <= 360.0:
+            return x
+        if -1.01 <= x <= 1.01:
+            if kind in ("pan", "tilt"):
+                return x * 180.0
+            return x
+        if -0.01 <= x <= 1.01:
+            if kind in ("pan", "tilt"):
+                return x * 360.0
+            return x
+        return x
+
     def _parse(self, txt: str) -> _Status:
         txt = txt.strip()
         data = {}
@@ -144,18 +163,12 @@ class PtzCgiThread:
         else:
             for k, v in re.findall(r"(\w+)=([^\s&]+)", txt):
                 data[k.lower()] = v
-        pan = self._to_float(data.get("pan"))
-        tilt = self._to_float(data.get("tilt"))
-        zoom_raw = self._to_float(data.get("zoom"))
+        pan = self._to_deg(data.get("pan"), "pan")
+        tilt = self._to_deg(data.get("tilt"), "tilt")
+        zoom_raw = self._to_deg(data.get("zoom"), "zoom")
         zoom = self._normalize_zoom(zoom_raw)
-        focus = self._to_float(data.get("focus"))
+        focus = self._to_deg(data.get("focus"), "zoom")
         return _Status(pan_deg=pan, tilt_deg=tilt, zoom_norm=zoom, focus_pos=focus)
-
-    def _to_float(self, v) -> Optional[float]:
-        try:
-            return float(v)
-        except Exception:
-            return None
 
     def _run(self) -> None:
         if self._csv_path:
@@ -178,30 +191,42 @@ class PtzCgiThread:
                 self._last.tilt_deg = st.tilt_deg
                 self._last.zoom_norm = st.zoom_norm
                 self._last.focus_pos = st.focus_pos
+                row = {
+                    "ts": time.time(),
+                    "pan_deg": getattr(st, "pan_deg", None),
+                    "tilt_deg": getattr(st, "tilt_deg", None),
+                    "zoom_norm": getattr(st, "zoom_norm", None),
+                    "focus_pos": getattr(st, "focus_pos", None),
+                }
                 try:
                     import shared_state
                     shared_state.ptz_meta = {
-                        "ts": time.time(),
-                        "pan_deg": st.pan_deg,
-                        "tilt_deg": st.tilt_deg,
+                        "ts": row["ts"],
+                        "pan_deg": row["pan_deg"],
+                        "tilt_deg": row["tilt_deg"],
                         "zoom_mm": None,
-                        "zoom_norm": st.zoom_norm,
+                        "zoom_norm": row["zoom_norm"],
                         "pan_dps": None,
                         "tilt_dps": None,
                         "zoom_speed": None,
                         "hfov_deg": None,
-                        "focus_pos": st.focus_pos,
+                        "focus_pos": row["focus_pos"],
+                        "cgi_last": {
+                            "pan_deg": row["pan_deg"],
+                            "tilt_deg": row["tilt_deg"],
+                            "zoom": row["zoom_norm"],
+                        },
                     }
                 except Exception:
                     pass
                 if self._csv_writer:
                     try:
                         self._csv_writer.writerow([
-                            time.time(),
-                            st.pan_deg,
-                            st.tilt_deg,
-                            st.zoom_norm,
-                            st.focus_pos,
+                            row["ts"],
+                            row["pan_deg"],
+                            row["tilt_deg"],
+                            row["zoom_norm"],
+                            row["focus_pos"],
                         ])
                         self._csv_file.flush()
                     except Exception:

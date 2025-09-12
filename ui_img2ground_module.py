@@ -35,6 +35,7 @@ from calibration_utils import roll_error_from_horizon
 
 APP_DIR = Path(__file__).resolve().parent
 APP_CFG = APP_DIR / "app_config.json"
+PROFILES_PATH = APP_DIR / "profiles.json"
 
 
 def load_cfg() -> dict:
@@ -447,18 +448,39 @@ class Img2GroundModule(QtCore.QObject):
         return self._root
 
     def _persist_ctx_offsets(self, ctx) -> None:
-        """Store current context offsets in the project structure if available."""
+        """Store current context offsets in the project and profile."""
         proj = getattr(app_state, "project", None)
         alias = getattr(ctx, "alias", None)
-        if proj is None or not alias:
-            return
-        d = getattr(proj, "offset_for_camera", {}) or {}
-        d[alias] = {
-            "yaw_offset_deg": getattr(ctx, "yaw_offset_deg", 0.0),
-            "pitch_offset_deg": getattr(ctx, "pitch_offset_deg", 0.0),
-            "roll_offset_deg": getattr(ctx, "roll_offset_deg", 0.0),
-        }
-        proj.offset_for_camera = d
+        yaw = getattr(ctx, "yaw_offset_deg", 0.0)
+        pitch = getattr(ctx, "pitch_offset_deg", 0.0)
+        roll = getattr(ctx, "roll_offset_deg", 0.0)
+
+        if proj is not None and alias:
+            d = getattr(proj, "offset_for_camera", {}) or {}
+            d[alias] = {
+                "yaw_offset_deg": yaw,
+                "pitch_offset_deg": pitch,
+                "roll_offset_deg": roll,
+            }
+            proj.offset_for_camera = d
+
+        if alias:
+            try:
+                profiles = []
+                if PROFILES_PATH.exists():
+                    profiles = json.loads(PROFILES_PATH.read_text(encoding="utf-8"))
+                updated = False
+                for p in profiles:
+                    if p.get("name") == alias:
+                        p["yaw_offset_deg"] = yaw
+                        p["pitch_offset_deg"] = pitch
+                        p["roll_offset_deg"] = roll
+                        updated = True
+                        break
+                if updated:
+                    PROFILES_PATH.write_text(json.dumps(profiles, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
 
     # ----- UI -----
     def _build_ui(self) -> QtWidgets.QWidget:

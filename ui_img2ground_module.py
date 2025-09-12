@@ -428,7 +428,7 @@ class Img2GroundModule(QtCore.QObject):
         self._ptz_timer = QtCore.QTimer(self._root); self._ptz_timer.timeout.connect(self._poll_ptz_ui); self._ptz_timer.start(400)
         self._az_btn_timer = QtCore.QTimer(self._root)
         self._az_btn_timer.setInterval(800)
-        self._az_btn_timer.timeout.connect(self._refresh_az_btn_state)
+        self._az_btn_timer.timeout.connect(self._update_ready_checks)
         self._az_btn_timer.start()
         shared_state.signal_camera_changed.connect(self._on_active_camera_changed)
         shared_state.signal_stream_mode_changed.connect(self._on_stream_mode_changed)
@@ -441,6 +441,7 @@ class Img2GroundModule(QtCore.QObject):
         if app_state.current_camera:
             self.use_active_camera(force=True)
         self._on_stream_mode_changed(getattr(app_state, "stream_mode", "online"))
+        self._update_ready_checks()
 
     def widget(self) -> QtWidgets.QWidget:
         return self._root
@@ -502,6 +503,19 @@ class Img2GroundModule(QtCore.QObject):
         self.btn_reset.clicked.connect(self._reset_calibration)
         g.addWidget(self.btn_reset, r, 0, 1, 8); r += 1
 
+        # readiness indicators
+        ready_box = QtWidgets.QGroupBox("Calibration readiness")
+        lr = QtWidgets.QVBoxLayout(ready_box)
+        self._lbl_ready_ortho = QtWidgets.QLabel()
+        self._lbl_ready_cam = QtWidgets.QLabel()
+        self._lbl_ready_pan = QtWidgets.QLabel()
+        self._lbl_ready_intr = QtWidgets.QLabel()
+        lr.addWidget(self._lbl_ready_ortho)
+        lr.addWidget(self._lbl_ready_cam)
+        lr.addWidget(self._lbl_ready_pan)
+        lr.addWidget(self._lbl_ready_intr)
+        g.addWidget(ready_box, r, 0, 1, 8); r += 1
+
         # simple calibration group
         grp_simple = QtWidgets.QGroupBox("Calibration (Simple)")
         gls = QtWidgets.QHBoxLayout(grp_simple)
@@ -515,16 +529,8 @@ class Img2GroundModule(QtCore.QObject):
         g.addWidget(grp_simple, r, 0, 1, 8); r += 1
 
         # camera model / calibration
-        # keep Az button disabled until we have both ortho & pan
+        self.btn_level_horizon.setEnabled(False)
         self.btn_az_from_ortho.setEnabled(False)
-        # periodic refresh until PAN telemetry arrives
-        # QTimer should use the widget created in this method as parent.
-        # Using self._root here caused an AttributeError during initialization
-        # because self._root isn't set until after _build_ui returns.
-        self._az_btn_timer = QtCore.QTimer(w)
-        self._az_btn_timer.setInterval(800)
-        self._az_btn_timer.timeout.connect(self._refresh_az_btn_state)
-        self._az_btn_timer.start()
         self.chk_use_active = QtWidgets.QCheckBox("Use active camera (from RTSP tab)")
         self.chk_use_active.toggled.connect(self.use_active_camera)
         self.btn_refresh_cam = QtWidgets.QPushButton("\uD83D\uDD04 Refresh from live")
@@ -560,6 +566,8 @@ class Img2GroundModule(QtCore.QObject):
         glc.addWidget(QtWidgets.QLabel("p2"),3,2); glc.addWidget(self.p2,3,3)
         glc.addWidget(QtWidgets.QLabel("k3"),4,0); glc.addWidget(self.k3,4,1)
         g.addWidget(grp_cam, r, 0, 1, 8); r += 1
+        for spn in (self.fx, self.fy, self.cx, self.cy):
+            spn.valueChanged.connect(self._update_ready_checks)
 
         # PTZ group
         grp = QtWidgets.QGroupBox("PTZ / ONVIF")
@@ -576,6 +584,7 @@ class Img2GroundModule(QtCore.QObject):
         self.btn_ptz_from_cam = QtWidgets.QPushButton("Use from Cameras tab"); self.btn_ptz_from_cam.clicked.connect(self._ptz_load_from_shared)
         self.lbl_ptz = QtWidgets.QLabel("Pan=?, Tilt=?, Zoom=?, F(mm)=?")
         self.btn_fov_cal = QtWidgets.QPushButton("Calibrate FOV with PTZ…"); self.btn_fov_cal.clicked.connect(self._calibrate_fov_with_ptz)
+        self.btn_fov_cal.setEnabled(False)
         gl.addWidget(QtWidgets.QLabel("Host:"), 0,0); gl.addWidget(self.ed_host,0,1)
         gl.addWidget(QtWidgets.QLabel("Port:"), 0,2); gl.addWidget(self.ed_port,0,3)
         gl.addWidget(self.btn_ptz_from_cam, 0,4)
@@ -726,7 +735,7 @@ class Img2GroundModule(QtCore.QObject):
                 if hasattr(meta, "last"):
                     self._ptz_last = meta.last()
                 self.lbl_ptz_status.setText("PTZ: attached (shared)")
-                self._refresh_az_btn_state()
+                self._update_ready_checks()
                 return
             except Exception:
                 pass
@@ -745,7 +754,7 @@ class Img2GroundModule(QtCore.QObject):
             except Exception as e:
                 self._log(f"Auto PTZ connect failed: {e}")
 
-        self._refresh_az_btn_state()
+        self._update_ready_checks()
 
     def _on_stream_mode_changed(self, mode: str) -> None:
         ctx = app_state.current_camera
@@ -798,6 +807,7 @@ class Img2GroundModule(QtCore.QObject):
             self.p2.setValue(ctx.distortion.p2)
             if ctx.distortion.k3 is not None:
                 self.k3.setValue(ctx.distortion.k3)
+        self._update_ready_checks()
 
     # ----- Ortho / Map -----
     def _ensure_scene(self) -> QtWidgets.QGraphicsScene:
@@ -822,7 +832,7 @@ class Img2GroundModule(QtCore.QObject):
             shared_state.orthophoto_path = layer.path
             self._log(f"Orthophoto loaded (EPSG={layer.ds.crs.to_epsg()})")
             self._remove_last_pick(); self._remove_video_frame_outline(); self._remove_fov_wedge()
-            self._refresh_az_btn_state()
+            self._update_ready_checks()
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 
@@ -885,7 +895,7 @@ class Img2GroundModule(QtCore.QObject):
             pass
         self.ed_dtm.setText(str(dtm) if dtm else "")
         self.ed_ortho.setText(str(ortho) if ortho else "")
-        QtCore.QTimer.singleShot(0, self._refresh_az_btn_state)
+        QtCore.QTimer.singleShot(0, self._update_ready_checks)
 
     def _open_prep_tab(self):
         QtWidgets.QMessageBox.information(None, "Preparation", "Load DTM/Orthophoto in the Preparation tab.")
@@ -1049,7 +1059,7 @@ class Img2GroundModule(QtCore.QObject):
             )
         except Exception:
             pass
-        self._refresh_az_btn_state()
+        self._update_ready_checks()
 
     # ----- FOV calib via PTZ -----
     def _get_pan_now(self):
@@ -1085,13 +1095,25 @@ class Img2GroundModule(QtCore.QObject):
             return float(ctx.pan_deg)
         return None
 
-    def _refresh_az_btn_state(self):
-        pan_from_client = getattr(getattr(self, "_ptz_last", None), "pan_deg", None)
-        pan_meta = (getattr(shared_state, "ptz_meta", None) or {}).get("pan_deg")
-        self.btn_az_from_ortho.setEnabled(
-            (self._ortho_layer is not None)
-            and (pan_from_client is not None or pan_meta is not None)
-        )
+    def _set_ready_lbl(self, lbl: QtWidgets.QLabel, ok: bool, text: str) -> None:
+        icon = "\u2713" if ok else "\u2717"
+        color = "#0a0" if ok else "#a00"
+        lbl.setText(f"{icon} {text}")
+        lbl.setStyleSheet(f"color: {color};")
+
+    def _update_ready_checks(self) -> None:
+        ortho_ok = self._ortho_layer is not None
+        cam_ok = getattr(shared_state, "camera_proj", None) is not None
+        pan_ok = self._get_pan_now() is not None
+        intr_ok = self.fx.value() != 0.0 and self.fy.value() != 0.0
+        self._set_ready_lbl(self._lbl_ready_ortho, ortho_ok, "Ortho")
+        self._set_ready_lbl(self._lbl_ready_cam, cam_ok, "Camera XY")
+        self._set_ready_lbl(self._lbl_ready_pan, pan_ok, "PTZ pan")
+        self._set_ready_lbl(self._lbl_ready_intr, intr_ok, "Intrinsics")
+        all_ok = ortho_ok and cam_ok and pan_ok and intr_ok
+        self.btn_level_horizon.setEnabled(all_ok)
+        self.btn_az_from_ortho.setEnabled(all_ok)
+        self.btn_fov_cal.setEnabled(all_ok)
 
     def _calibrate_fov_with_ptz(self):
         """Calibrate yaw offset and FOV using PTZ telemetry.
@@ -1248,7 +1270,7 @@ class Img2GroundModule(QtCore.QObject):
             yaw_rad = math.radians(yaw_avg)
             d = np.array([math.sin(yaw_rad), math.cos(yaw_rad), 0.0])
             self._draw_azimuth_line(o, d, georef)
-        self._refresh_az_btn_state()
+        self._update_ready_checks()
 
     # ----- FOV wedge drawing -----
     def _remove_fov_wedge(self):

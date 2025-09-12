@@ -38,17 +38,15 @@ class UserTab(QtWidgets.QWidget):
         self._log = log_func
         self._az_item = None
         self._last_pick: Optional[Tuple[float, float]] = None
-        self._last_pick_item: QtWidgets.QGraphicsEllipseItem | None = None
+        self._last_pick_item: QtWidgets.QGraphicsItem | None = None
         self._last_pick_label: QtWidgets.QGraphicsSimpleTextItem | None = None
         self._ortho_layer: RasterLayer | None = None
         self._dtm_path: str | None = None
 
         # ----- toolbar -----
         bar = QtWidgets.QToolBar()
-        self.act_pick = bar.addAction("Pick now")
+        self.act_pick = bar.addAction("Pick & Copy/QR")
         self.act_az = bar.addAction("Toggle Azimuth")
-        self.act_copy = bar.addAction("Copy GMaps link")
-        self.act_qr = bar.addAction("Show QR")
         self.cmb_mapping = QtWidgets.QComboBox()
         self.cmb_mapping.addItems(["Auto (prefer Homography)", "Homography only", "PTZ+DTM only"])
         bar.addWidget(self.cmb_mapping)
@@ -75,8 +73,6 @@ class UserTab(QtWidgets.QWidget):
         # ----- signal wiring -----
         self.act_pick.triggered.connect(self.on_pick_now)
         self.act_az.triggered.connect(self.on_toggle_azimuth)
-        self.act_copy.triggered.connect(self.on_copy_gmaps)
-        self.act_qr.triggered.connect(self.on_make_qr)
         bus.signal_camera_changed.connect(self._on_active_camera_changed)
         shared_state.signal_layers_changed.connect(self._on_layers_changed)
         shared_state.signal_camera_changed.connect(self._apply_current_layers)
@@ -234,6 +230,8 @@ class UserTab(QtWidgets.QWidget):
             self._show_pick_on_map(xs, ys, text=f"{lat:.5f},{lon:.5f}")
             QtWidgets.QApplication.clipboard().setText(f"{lat:.6f},{lon:.6f}")
             self._toast("Copied to clipboard")
+            # Show QR for immediate sharing
+            self.on_make_qr()
         except Exception as e:
             self._toast(f"Mapping failed: {e}", error=True)
 
@@ -243,7 +241,11 @@ class UserTab(QtWidgets.QWidget):
             sc = QtWidgets.QGraphicsScene()
             self.map.setScene(sc)
         if self._last_pick_item is None:
-            it = QtWidgets.QGraphicsEllipseItem(-5, -5, 10, 10)
+            path = QtGui.QPainterPath()
+            path.addEllipse(-5, -5, 10, 10)
+            path.moveTo(0, 5)
+            path.lineTo(0, 20)
+            it = QtWidgets.QGraphicsPathItem(path)
             it.setBrush(QtGui.QBrush(QtGui.QColor(255, 220, 0)))
             it.setPen(QtGui.QPen(QtGui.QColor(30, 30, 30), 1))
             it.setZValue(50)
@@ -295,14 +297,6 @@ class UserTab(QtWidgets.QWidget):
         lay.addWidget(lab)
         dlg.resize(320, 320)
         dlg.exec()
-
-    def on_copy_gmaps(self) -> None:
-        link = self._current_link_for_share()
-        if not link:
-            self._toast("No link")
-            return
-        QtWidgets.QApplication.clipboard().setText(link)
-        self._toast("Link copied")
 
     # ------------------------------------------------------------------
     # helpers

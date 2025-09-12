@@ -22,11 +22,20 @@ def test_export_and_load_project(tmp_path, monkeypatch):
     ortho = tmp_path / "ortho.tif"; ortho.write_text("ortho")
 
     project_path = tmp_path / "scene.rtgproj"
-    profile = {"name": "cam1", "rtsp": {"url": "rtsp://example"}}
+    profile = {
+        "name": "cam1",
+        "rtsp": {"url": "rtsp://example"},
+        "yaw_offset_deg": 1.1,
+        "roll_offset_deg": 2.2,
+        "pitch_offset_deg": 3.3,
+    }
     export_project(project_path, profile, "b1", str(dtm), str(ortho))
 
     data = load_project(project_path)
     assert data["camera"]["name"] == "cam1"
+    assert data["camera"]["yaw_offset_deg"] == 1.1
+    assert data["camera"]["roll_offset_deg"] == 2.2
+    assert data["camera"]["pitch_offset_deg"] == 3.3
     assert data["bundle"]["name"] == "b1"
     assert Path(data["layers"]["dtm"]) == dtm
     assert Path(data["bundle"]["terrain_path"]).name == "mesh.obj"

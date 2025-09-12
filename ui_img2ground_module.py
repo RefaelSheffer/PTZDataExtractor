@@ -445,6 +445,20 @@ class Img2GroundModule(QtCore.QObject):
     def widget(self) -> QtWidgets.QWidget:
         return self._root
 
+    def _persist_ctx_offsets(self, ctx) -> None:
+        """Store current context offsets in the project structure if available."""
+        proj = getattr(app_state, "project", None)
+        alias = getattr(ctx, "alias", None)
+        if proj is None or not alias:
+            return
+        d = getattr(proj, "offset_for_camera", {}) or {}
+        d[alias] = {
+            "yaw_offset_deg": getattr(ctx, "yaw_offset_deg", 0.0),
+            "pitch_offset_deg": getattr(ctx, "pitch_offset_deg", 0.0),
+            "roll_offset_deg": getattr(ctx, "roll_offset_deg", 0.0),
+        }
+        proj.offset_for_camera = d
+
     # ----- UI -----
     def _build_ui(self) -> QtWidgets.QWidget:
         w = QtWidgets.QWidget(); g = QtWidgets.QGridLayout(w); r = 0
@@ -711,6 +725,8 @@ class Img2GroundModule(QtCore.QObject):
         self.lbl_ptz_status.setVisible(True)
 
     def _on_active_camera_changed(self, ctx) -> None:
+        if ctx is not None:
+            self._yaw_offset_deg = getattr(ctx, "yaw_offset_deg", None)
         if self.chk_use_active.isChecked() and ctx and getattr(ctx, "rtsp_url", None):
             try: self.ed_rtsp.setText(ctx.rtsp_url)
             except Exception: pass
@@ -1177,6 +1193,7 @@ class Img2GroundModule(QtCore.QObject):
             if last:
                 setattr(ctx, "tilt_at_level_deg", getattr(last, "tilt_deg", None))
                 setattr(ctx, "zoom_at_level", getattr(last, "zoom", None))
+            self._persist_ctx_offsets(ctx)
             shared_state.signal_camera_changed.emit(ctx)
         self.lbl_status.setText(f"Level applied: roll_offset={-roll:.2f}°, pitch≈{pitch:.2f}°")
         QtWidgets.QMessageBox.information(None, "Level from horizon",
@@ -1237,6 +1254,7 @@ class Img2GroundModule(QtCore.QObject):
         ctx = getattr(app_state, "current_camera", None)
         if ctx is not None:
             setattr(ctx, "yaw_offset_deg", getattr(ctx, "yaw_offset_deg", 0.0) + self._yaw_offset_deg)
+            self._persist_ctx_offsets(ctx)
             shared_state.signal_camera_changed.emit(ctx)
         self.lbl_status.setText(f"Azimuth offset={self._yaw_offset_deg:.2f}° (bearing {yaw_avg:.2f}°)")
         QtWidgets.QMessageBox.information(None, "Azimuth from ortho",

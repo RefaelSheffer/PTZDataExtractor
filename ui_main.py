@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from PySide6 import QtCore, QtGui, QtWidgets
 import vlc
+import types
 
 from ui_cam_module import CameraModule
 from ui_prep_module import PrepModule
@@ -14,6 +15,7 @@ from ui_img2ground_module import Img2GroundModule
 from ui_user_module import UserModule
 from project_io import export_project, load_project
 import shared_state
+from app_state import app_state
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -123,6 +125,18 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Open Project", f"Failed: {e}")
             return
+        # Keep project data globally for per-camera metadata
+        proj = types.SimpleNamespace(**data)
+        alias = data.get("camera", {}).get("name", "default")
+        offsets = {
+            k: data.get("camera", {}).get(k)
+            for k in ("yaw_offset_deg", "pitch_offset_deg", "roll_offset_deg")
+            if data.get("camera", {}).get(k) is not None
+        }
+        if offsets:
+            proj.offset_for_camera = {alias: offsets}
+        app_state.project = proj
+
         self.cam_module.apply_profile(data.get("camera", {}))
         bundle = data.get("bundle")
         if bundle:

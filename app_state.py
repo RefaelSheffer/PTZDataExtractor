@@ -38,6 +38,10 @@ class LiveCameraContext:
     distortion: Optional[Distortion] = None
     layers: Optional[Dict[str, Any]] = None
     calibration: Optional[Dict[str, float]] = None
+    # Persisted orientation offsets (degrees)
+    yaw_offset_deg: float = 0.0
+    roll_offset_deg: float = 0.0
+    pitch_offset_deg: float = 0.0
     alias: str | None = None
     pwd: str | None = None
     used_tcp: bool | None = None

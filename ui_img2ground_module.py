@@ -416,7 +416,7 @@ class Img2GroundModule(QtCore.QObject):
 
         self._root = self._build_ui()
         self._attach_vlc_events()
-        QtCore.QTimer.singleShot(0, self._try_load_shared_ortho)
+        QtCore.QTimer.singleShot(0, lambda: self._apply_layers_for(getattr(app_state.current_camera, 'alias', None)))
         self.chk_use_active.blockSignals(True)
         self.chk_use_active.setChecked(True)
         self.chk_use_active.blockSignals(False)
@@ -436,6 +436,7 @@ class Img2GroundModule(QtCore.QObject):
             lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None))
         )
         shared_state.signal_layers_changed.connect(self._on_layers_changed)
+        bus.signal_camera_changed.connect(lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None)))
         bus.signal_ortho_changed.connect(self.apply_ortho)
         if app_state.current_camera:
             self.use_active_camera(force=True)
@@ -483,18 +484,23 @@ class Img2GroundModule(QtCore.QObject):
         splitter.setStretchFactor(0,1); splitter.setStretchFactor(1,1)
         g.addWidget(splitter, r, 0, 1, 8); r += 1
 
-        # ortho tools
+        # Ortho/DTM are managed ONLY in Preparation tab
         rowm = QtWidgets.QHBoxLayout()
-        self.btn_reset = QtWidgets.QPushButton("Reset calibration"); self.btn_reset.clicked.connect(self._reset_calibration)
-        self.btn_advanced = QtWidgets.QToolButton(); self.btn_advanced.setText("Advanced ▾")
-        menu_adv = QtWidgets.QMenu(self.btn_advanced)
-        act_homo = menu_adv.addAction("Homography calibration…"); act_homo.triggered.connect(self._run_homography_dialog)
-        act_manual = menu_adv.addAction("Manual calibration dialog…"); act_manual.triggered.connect(self._open_calib_tools)
-        self.btn_advanced.setMenu(menu_adv); self.btn_advanced.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        rowm.addWidget(self.btn_advanced)
-        rowm.addStretch(1)
-        rowm.addWidget(self.btn_reset)
+        self.lbl_layers_source = QtWidgets.QLabel("Layers source: Preparation (read-only)")
+        self.ed_dtm = QtWidgets.QLineEdit(); self.ed_dtm.setReadOnly(True); self.ed_dtm.setPlaceholderText("DTM path (managed in Preparation)")
+        self.ed_ortho = QtWidgets.QLineEdit(); self.ed_ortho.setReadOnly(True); self.ed_ortho.setPlaceholderText("Orthophoto path (managed in Preparation)")
+        self.btn_open_prep = QtWidgets.QToolButton(); self.btn_open_prep.setText("Open Preparation…")
+        self.btn_open_prep.clicked.connect(self._open_prep_tab)
+        rowm.addWidget(self.lbl_layers_source)
+        rowm.addWidget(self.ed_dtm, 1)
+        rowm.addWidget(self.ed_ortho, 1)
+        rowm.addWidget(self.btn_open_prep)
         g.addLayout(rowm, r, 0, 1, 8); r += 1
+
+        # Reset calibration button
+        self.btn_reset = QtWidgets.QPushButton("Reset calibration")
+        self.btn_reset.clicked.connect(self._reset_calibration)
+        g.addWidget(self.btn_reset, r, 0, 1, 8); r += 1
 
         # simple calibration group
         grp_simple = QtWidgets.QGroupBox("Calibration (Simple)")
@@ -800,17 +806,6 @@ class Img2GroundModule(QtCore.QObject):
             sc = QtWidgets.QGraphicsScene(); self._map.setScene(sc)
         return sc
 
-    def _try_load_shared_ortho(self):
-        alias = getattr(app_state.current_camera, "alias", None)
-        path = None
-        if alias:
-            layers = shared_state.layers_for_camera.get(alias, {})
-            path = layers.get("ortho")
-        if not path:
-            path = getattr(shared_state, "orthophoto_path", None)
-        if path and Path(path).exists():
-            self._load_orthophoto(path, broadcast=False)
-        self._refresh_az_btn_state()
 
     def apply_ortho(self, layer: RasterLayer) -> None:
         try:
@@ -864,6 +859,10 @@ class Img2GroundModule(QtCore.QObject):
         if not alias:
             return
         layers = shared_state.layers_for_camera.get(alias)
+        if layers is None:
+            proj = getattr(app_state, "project", None)
+            if proj is not None:
+                layers = getattr(proj, "layers_for_camera", {}).get(alias)
         if layers:
             self._apply_layers(layers)
 
@@ -884,7 +883,12 @@ class Img2GroundModule(QtCore.QObject):
             self._map.fit()
         except Exception:
             pass
-        self._refresh_az_btn_state()
+        self.ed_dtm.setText(str(dtm) if dtm else "")
+        self.ed_ortho.setText(str(ortho) if ortho else "")
+        QtCore.QTimer.singleShot(0, self._refresh_az_btn_state)
+
+    def _open_prep_tab(self):
+        QtWidgets.QMessageBox.information(None, "Preparation", "Load DTM/Orthophoto in the Preparation tab.")
 
     def _resolve_path(self, p: str | None) -> str | None:
         if not p:

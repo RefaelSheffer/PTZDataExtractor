@@ -104,6 +104,9 @@ class CameraModule(QtCore.QObject):
         # Track last successful connection transport
         self._last_conn_force_tcp = True
 
+        # Orientation offsets loaded before establishing connection
+        self._pending_offsets: dict[str, float] = {}
+
     # ---- public API for the shell ----
     def widget(self) -> QtWidgets.QWidget:
         return self._root
@@ -1042,6 +1045,17 @@ class CameraModule(QtCore.QObject):
         """Return current camera connection settings as a profile dict."""
         p = self._profile_from_ui()
         p["camera_mode"] = "online" if self.radio_online.isChecked() else "mockup"
+        # Include orientation offsets from current context or pending profile
+        offsets: dict[str, float] = {}
+        ctx = getattr(app_state, "current_camera", None)
+        if ctx is not None:
+            for k in ("yaw_offset_deg", "pitch_offset_deg", "roll_offset_deg"):
+                v = getattr(ctx, k, 0.0)
+                if v:
+                    offsets[k] = v
+        else:
+            offsets.update(self._pending_offsets)
+        p.update(offsets)
         return p
 
     def apply_profile(self, p: dict) -> None:
@@ -1054,6 +1068,12 @@ class CameraModule(QtCore.QObject):
             self.radio_mockup.setChecked(mode == "mockup")
         self._on_mode_changed()
         self._apply_profile(p)
+        # Cache orientation offsets for later context creation
+        self._pending_offsets = {
+            k: float(p[k])
+            for k in ("yaw_offset_deg", "pitch_offset_deg", "roll_offset_deg")
+            if p.get(k) is not None
+        }
 
     def _apply_profile(self, p: dict):
         if not p:
@@ -1320,6 +1340,12 @@ class CameraModule(QtCore.QObject):
                     if dist.k3 is not None:
                         calib["k3"] = dist.k3
 
+        # Orientation offsets may come from project or pending profile
+        offsets: dict[str, float] = {}
+        if proj:
+            offsets.update(getattr(proj, "offset_for_camera", {}).get(alias) or {})
+        offsets.update(self._pending_offsets)
+
         ctx = LiveCameraContext(
             online=True,
             brand=brand,
@@ -1339,6 +1365,9 @@ class CameraModule(QtCore.QObject):
             distortion=dist,
             layers=layers,
             calibration=calib,
+            yaw_offset_deg=float(offsets.get("yaw_offset_deg", 0.0)),
+            roll_offset_deg=float(offsets.get("roll_offset_deg", 0.0)),
+            pitch_offset_deg=float(offsets.get("pitch_offset_deg", 0.0)),
             alias=alias,
             used_tcp=tcp,
             mock_file=(

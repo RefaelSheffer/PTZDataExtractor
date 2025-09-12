@@ -938,8 +938,6 @@ class Img2GroundModule(QtCore.QObject):
     def _apply_layers(self, layers: dict) -> None:
         ortho = self._resolve_path(layers.get("ortho"))
         dtm = self._resolve_path(layers.get("dtm"))
-        if ortho:
-            self._load_orthophoto(ortho)
         if dtm:
             try:
                 if self._dtm is not None:
@@ -948,15 +946,19 @@ class Img2GroundModule(QtCore.QObject):
                 self._dtm_path = dtm
             except Exception:
                 pass
+        if ortho:
+            self._load_orthophoto(ortho)
+            # Flag the presence of an orthophoto for readiness checks
+            self._ortho_layer = getattr(self._map, "ortho_layer", None) or True
         try:
             self._map.fit()
         except Exception:
             pass
         self.ed_dtm.setText(str(dtm) if dtm else "")
         self.ed_ortho.setText(str(ortho) if ortho else "")
-        self._refresh_readiness()
-        self._refresh_az_btn_state()
-        self._refresh_level_btn_state()
+        QtCore.QTimer.singleShot(0, self._refresh_readiness)
+        QtCore.QTimer.singleShot(0, self._refresh_az_btn_state)
+        QtCore.QTimer.singleShot(0, self._refresh_level_btn_state)
 
     def _open_prep_tab(self):
         QtWidgets.QMessageBox.information(None, "Preparation", "Load DTM/Orthophoto in the Preparation tab.")
@@ -1163,7 +1165,7 @@ class Img2GroundModule(QtCore.QObject):
         has_ortho = bool(self._ortho_layer)
         has_xy = bool(getattr(shared_state, "camera_proj", None))
         has_pan = self._get_pan_now() is not None
-        has_intr = self.fx.value() != 0.0 and self.fy.value() != 0.0
+        has_intr = bool(getattr(getattr(app_state, "current_camera", None), "intrinsics", None))
         return has_ortho, has_xy, has_pan, has_intr
 
     def _set_ready_lbl(self, lbl: QtWidgets.QLabel, ok: bool, text: str) -> None:
@@ -1173,6 +1175,13 @@ class Img2GroundModule(QtCore.QObject):
         lbl.setStyleSheet(f"color: {color};")
 
     def _refresh_readiness(self) -> None:
+        if not getattr(self, "_dbg_readiness_printed", False):
+            self._log(
+                f"DBG readiness: ortho={bool(self._ortho_layer)} "
+                f"xy={bool(getattr(shared_state,'camera_proj',None))} "
+                f"pan={self._get_pan_now()}"
+            )
+            self._dbg_readiness_printed = True
         has_ortho, has_xy, has_pan, has_intr = self._ready_flags()
         self._set_ready_lbl(self._lbl_ready_ortho, has_ortho, "Ortho")
         self._set_ready_lbl(self._lbl_ready_cam, has_xy, "Camera XY")

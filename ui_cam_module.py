@@ -340,9 +340,19 @@ class CameraModule(QtCore.QObject):
 
         # ---------- VLC events ----------
         ev = self.video.player().event_manager()
-        ev.event_attach(vlc.EventType.MediaPlayerPlaying, lambda e: self._log("VLC: Playing"))
-        ev.event_attach(vlc.EventType.MediaPlayerEncounteredError, lambda e: self._log("VLC: EncounteredError"))
-        ev.event_attach(vlc.EventType.MediaPlayerEndReached, lambda e: self._log("VLC: EndReached"))
+
+        def _on_vlc_playing(e):
+            self._log("VLC: Playing")
+            shared_state.signal_rtsp_state_changed.emit("Playing")
+
+        def _on_vlc_stopped(e):
+            self._log("VLC: Stopped")
+            shared_state.signal_rtsp_state_changed.emit("Stopped")
+
+        ev.event_attach(vlc.EventType.MediaPlayerPlaying, _on_vlc_playing)
+        ev.event_attach(vlc.EventType.MediaPlayerEncounteredError, _on_vlc_stopped)
+        ev.event_attach(vlc.EventType.MediaPlayerEndReached, _on_vlc_stopped)
+        ev.event_attach(vlc.EventType.MediaPlayerStopped, _on_vlc_stopped)
 
         return root
 
@@ -809,6 +819,8 @@ class CameraModule(QtCore.QObject):
                 pass
             self._ptz_client = None
 
+        shared_state.signal_ptz_mode_changed.emit("")
+
         # cancel auto-retry
         self._retry_url = ""
         self._retry_attempts = 0
@@ -1253,8 +1265,10 @@ class CameraModule(QtCore.QObject):
             )
             self._ptz_meta.start()
             mode = self._ptz_client.mode.upper() if self._ptz_client.mode else ""
+            shared_state.signal_ptz_mode_changed.emit(mode)
             self._log(f"PTZ telemetry ({mode}) logging -> {csv_path}")
         except Exception as e:
+            shared_state.signal_ptz_mode_changed.emit("")
             self._log(f"Failed to start PTZ telemetry: {e}")
 
     def _update_live_context(

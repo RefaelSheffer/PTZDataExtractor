@@ -30,8 +30,22 @@ def _obj_to_dict(obj):
     except Exception:
         return {}
 
-def save_bundle(name: str, intr: CameraIntrinsics, pose: CameraPose, mesh_path: str,
-                meta: Dict[str, Any] = None, georef: Dict[str, Any] = None):
+def save_bundle(
+    name: str,
+    intr: CameraIntrinsics,
+    pose: CameraPose,
+    mesh_path: str,
+    meta: Dict[str, Any] = None,
+    georef: Dict[str, Any] = None,
+    yaw_offset_deg: float = 0.0,
+    pitch_offset_deg: float = 0.0,
+    roll_offset_deg: float = 0.0,
+):
+    """Persist a calibration bundle to disk.
+
+    Orientation offsets are stored alongside other bundle data so that
+    subsequent sessions can restore them without relying solely on RAM.
+    """
     CALIB_DIR.mkdir(exist_ok=True, parents=True)
     data = {
         "name": name,
@@ -41,6 +55,9 @@ def save_bundle(name: str, intr: CameraIntrinsics, pose: CameraPose, mesh_path: 
         "terrain_type": "mesh",
         "meta": meta or {},
         "georef": georef or {},
+        "yaw_offset_deg": float(yaw_offset_deg),
+        "pitch_offset_deg": float(pitch_offset_deg),
+        "roll_offset_deg": float(roll_offset_deg),
     }
     out = CALIB_DIR / f"{name}.json"
     out.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -62,6 +79,10 @@ def load_bundle(name: str):
     mesh_path = d.get("mesh_path")
     terrain_path = d.get("terrain_path", mesh_path)
     meta = d.get("meta", {})
+    # Expose persisted orientation offsets via meta as well
+    meta.setdefault("yaw_offset_deg", float(d.get("yaw_offset_deg", 0.0)))
+    meta.setdefault("pitch_offset_deg", float(d.get("pitch_offset_deg", 0.0)))
+    meta.setdefault("roll_offset_deg", float(d.get("roll_offset_deg", 0.0)))
     georef = d.get("georef", {})
     return intr, pose, terrain_path, meta, georef
 

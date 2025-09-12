@@ -83,7 +83,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.lbl_rtsp = _chip("RTSP: Stopped")
         self.lbl_ptz = _chip("PTZ: —")
-        self.lbl_layers = _chip("Layers: Ortho — / DTM —")
+        # Combined layer readiness (both ortho and DTM must be loaded)
+        self.lbl_layers = _chip("Layers: Ortho/DTM —")
         self.lbl_telemetry = _chip("Telemetry: pan —")
         for w in (self.lbl_rtsp, self.lbl_ptz, self.lbl_layers, self.lbl_telemetry):
             self.status_toolbar.addWidget(w)
@@ -186,9 +187,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @QtCore.Slot(str, dict)
     def _on_layers(self, _alias: str, layers: dict):
-        ortho = "✓" if layers.get("ortho") else "—"
-        dtm = "✓" if layers.get("dtm") else "—"
-        self.lbl_layers.setText(f"Layers: Ortho {ortho} / DTM {dtm}")
+        """Update layer readiness chip.
+
+        The calibration workflow requires both an orthophoto and a DTM.
+        Display a single check mark when both are available to keep the
+        indicator compact.
+        """
+        ready = "✓" if layers.get("ortho") and layers.get("dtm") else "—"
+        self.lbl_layers.setText(f"Layers: Ortho/DTM {ready}")
 
     @QtCore.Slot(object)
     def _on_ptz_meta(self, meta: object):

@@ -17,7 +17,7 @@ class DummyPtzCgi(PtzCgiThread):
 
 
 def test_ptz_cgi_thread_shared_state():
-    shared_state.ptz_meta = None
+    shared_state.update_ptz_meta(None)
     th = DummyPtzCgi()
     th.start()
     time.sleep(0.05)

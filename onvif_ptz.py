@@ -302,7 +302,7 @@ class PtzMetaThread:
 
             try:
                 import shared_state
-                shared_state.ptz_meta = {
+                shared_state.update_ptz_meta({
                     'ts': meta.ts,
                     'pan_deg': meta.pan_deg,
                     'tilt_deg': meta.tilt_deg,
@@ -313,7 +313,7 @@ class PtzMetaThread:
                     'zoom_speed': meta.zoom_speed,
                     'hfov_deg': meta.hfov_deg,
                     'focus_pos': meta.focus_pos,
-                }
+                })
             except Exception:
                 pass
 

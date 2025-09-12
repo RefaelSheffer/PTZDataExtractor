@@ -69,6 +69,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status = self.statusBar()
         self.status.showMessage("Ready")
 
+        # Top status toolbar with small chips
+        self.status_toolbar = QtWidgets.QToolBar()
+        self.status_toolbar.setMovable(False)
+        self.addToolBar(QtCore.Qt.TopToolBarArea, self.status_toolbar)
+
+        def _chip(text: str) -> QtWidgets.QLabel:
+            lbl = QtWidgets.QLabel(text)
+            lbl.setStyleSheet(
+                "QLabel{border:1px solid #aaa;border-radius:4px;padding:2px 6px;}"
+            )
+            return lbl
+
+        self.lbl_rtsp = _chip("RTSP: Stopped")
+        self.lbl_ptz = _chip("PTZ: —")
+        self.lbl_layers = _chip("Layers: Ortho — / DTM —")
+        self.lbl_telemetry = _chip("Telemetry: pan —")
+        for w in (self.lbl_rtsp, self.lbl_ptz, self.lbl_layers, self.lbl_telemetry):
+            self.status_toolbar.addWidget(w)
+
         # Route Qt warnings/errors to the log dock
         def _qt_log_handler(mode, ctx, msg):
             self.log(f"Qt: {msg}")
@@ -101,6 +120,12 @@ class MainWindow(QtWidgets.QMainWindow):
         user = UserModule(self.vlc_instance, log_func=self.log)
         self._modules.append(user)
         self.tabs.insertTab(0, _scroll(user.widget()), user.title)
+
+        # Connect shared status signals
+        shared_state.signal_rtsp_state_changed.connect(self._on_rtsp_state)
+        shared_state.signal_ptz_mode_changed.connect(self._on_ptz_mode)
+        shared_state.signal_layers_changed.connect(self._on_layers)
+        shared_state.signal_ptz_meta_changed.connect(self._on_ptz_meta)
 
     def save_project(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Project", "", "RTG Project (*.rtgproj)")
@@ -149,6 +174,28 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.Slot(str)
     def log(self, line: str):
         self.log_view.appendPlainText(line)
+
+    # ------- status updates -------
+    @QtCore.Slot(str)
+    def _on_rtsp_state(self, state: str):
+        self.lbl_rtsp.setText(f"RTSP: {state}")
+
+    @QtCore.Slot(str)
+    def _on_ptz_mode(self, mode: str):
+        self.lbl_ptz.setText(f"PTZ: {mode or '—'}")
+
+    @QtCore.Slot(str, dict)
+    def _on_layers(self, _alias: str, layers: dict):
+        ortho = "✓" if layers.get("ortho") else "—"
+        dtm = "✓" if layers.get("dtm") else "—"
+        self.lbl_layers.setText(f"Layers: Ortho {ortho} / DTM {dtm}")
+
+    @QtCore.Slot(object)
+    def _on_ptz_meta(self, meta: object):
+        pan_ok = "—"
+        if isinstance(meta, dict):
+            pan_ok = "✓" if meta.get("pan_deg") is not None else "—"
+        self.lbl_telemetry.setText(f"Telemetry: pan {pan_ok}")
 
 def main():
     app = QtWidgets.QApplication(sys.argv)

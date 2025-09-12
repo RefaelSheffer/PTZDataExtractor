@@ -25,6 +25,9 @@ class SharedState(QtCore.QObject):
     signal_stream_mode_changed = QtCore.Signal(str)
     signal_camera_changed = QtCore.Signal(object)
     signal_layers_changed = QtCore.Signal(str, dict)  # (alias, layers)
+    signal_ptz_meta_changed = QtCore.Signal(object)
+    signal_rtsp_state_changed = QtCore.Signal(str)
+    signal_ptz_mode_changed = QtCore.Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -33,8 +36,20 @@ class SharedState(QtCore.QObject):
 
 
 _state = SharedState()
+
+
+def update_ptz_meta(meta: Optional[Dict]) -> None:
+    """Update latest PTZ telemetry and emit a change signal."""
+    global ptz_meta
+    ptz_meta = meta
+    _state.signal_ptz_meta_changed.emit(meta)
+
+
 signal_stream_mode_changed = _state.signal_stream_mode_changed
 signal_camera_changed = _state.signal_camera_changed
 signal_layers_changed = _state.signal_layers_changed
+signal_ptz_meta_changed = _state.signal_ptz_meta_changed
+signal_rtsp_state_changed = _state.signal_rtsp_state_changed
+signal_ptz_mode_changed = _state.signal_ptz_mode_changed
 layers_for_camera = _state.layers_for_camera
 shared_state = _state

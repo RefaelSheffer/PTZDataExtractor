@@ -200,7 +200,7 @@ class PtzCgiThread:
                 }
                 try:
                     import shared_state
-                    shared_state.ptz_meta = {
+                    shared_state.update_ptz_meta({
                         "ts": row["ts"],
                         "pan_deg": row["pan_deg"],
                         "tilt_deg": row["tilt_deg"],
@@ -216,7 +216,7 @@ class PtzCgiThread:
                             "tilt_deg": row["tilt_deg"],
                             "zoom": row["zoom_norm"],
                         },
-                    }
+                    })
                 except Exception:
                     pass
                 if self._csv_writer:

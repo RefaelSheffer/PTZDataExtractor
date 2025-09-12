@@ -17,7 +17,7 @@ import numpy as np
 from PySide6 import QtCore, QtWidgets, QtGui
 import vlc
 
-from camera_models import load_bundle, list_bundles
+from camera_models import load_bundle, list_bundles, CALIB_DIR
 from geom3d import camera_ray_in_world, GeoRef
 from dtm import DTM
 from map_view import MapView
@@ -482,6 +482,20 @@ class Img2GroundModule(QtCore.QObject):
                         break
                 if updated:
                     PROFILES_PATH.write_text(json.dumps(profiles, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
+        # Also persist offsets to the current bundle file if available
+        bundle_path = getattr(self, "_bundle_path", None)
+        if bundle_path:
+            try:
+                data = json.loads(Path(bundle_path).read_text(encoding="utf-8"))
+                data["yaw_offset_deg"] = yaw
+                data["pitch_offset_deg"] = pitch
+                data["roll_offset_deg"] = roll
+                Path(bundle_path).write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
             except Exception:
                 pass
 
@@ -975,6 +989,7 @@ class Img2GroundModule(QtCore.QObject):
                     "pose": getattr(pose, "to_dict", lambda: pose)(),
                     "terrain_path": terrain_path,
                     "georef": georef if isinstance(georef, dict) else getattr(georef, "to_dict", lambda: {})(),
+                    "meta": meta or {},
                 }
                 model_path = terrain_path
             else:
@@ -986,6 +1001,7 @@ class Img2GroundModule(QtCore.QObject):
                 self._dtm.close()
             self._dtm = DTM(model_path)
             self._dtm_path = model_path
+            self._bundle_path = CALIB_DIR / f"{name}.json"
             self.lbl_bundle.setText(f"Loaded: {name}"); self._log(f"Bundle loaded: {name}")
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Bundle", f"Failed to load bundle: {e}")

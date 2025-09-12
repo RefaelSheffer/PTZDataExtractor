@@ -400,9 +400,8 @@ class Img2GroundModule(QtCore.QObject):
         self._frame_item: Optional[QtWidgets.QGraphicsPathItem] = None
 
         # PTZ
-        self._ptz: Optional[PTZClient] = None
+        self._ptz_meta: Optional[PTZClient] = None
         self._ptz_last: PTZReading = PTZReading()
-        self._ptz_meta: Optional[Any] = None
         self._yaw_offset_deg: Optional[float] = None
         self._hfov_deg: Optional[float] = None
         self._fx_from_hfov: Optional[float] = None
@@ -553,6 +552,7 @@ class Img2GroundModule(QtCore.QObject):
 
         # PTZ group
         grp = QtWidgets.QGroupBox("PTZ / ONVIF")
+        self.grp_ptz = grp
         gl = QtWidgets.QGridLayout(grp)
         self.ed_host = QtWidgets.QLineEdit("192.168.1.108")
         self.ed_port = QtWidgets.QSpinBox(); self.ed_port.setRange(1,65535); self.ed_port.setValue(80)
@@ -582,6 +582,13 @@ class Img2GroundModule(QtCore.QObject):
         self.ptz_cgi_poll.valueChanged.connect(lambda _: self._save_app_cfg())
         self.ptz_cgi_https.stateChanged.connect(lambda _: self._save_app_cfg())
         g.addWidget(grp, r, 0, 1, 8); r += 1
+
+        self.lbl_ptz_status = QtWidgets.QLabel("PTZ: not connected")
+        self.lbl_ptz_status.setStyleSheet("color: #9ec;")
+        g.addWidget(self.lbl_ptz_status, r, 0, 1, 8); r += 1
+
+        self.chk_use_active.toggled.connect(self._update_ptz_visibility)
+        QtCore.QTimer.singleShot(0, self._update_ptz_visibility)
 
         # mapping mode + pick
         rowp = QtWidgets.QHBoxLayout()
@@ -687,6 +694,11 @@ class Img2GroundModule(QtCore.QObject):
         for w in (self.fx, self.fy, self.cx, self.cy, self.k1, self.k2, self.p1, self.p2, self.k3):
             w.setReadOnly(lock)
 
+    def _update_ptz_visibility(self):
+        use = self.chk_use_active.isChecked()
+        self.grp_ptz.setVisible(not use)
+        self.lbl_ptz_status.setVisible(True)
+
     def _on_active_camera_changed(self, ctx) -> None:
         if self.chk_use_active.isChecked() and ctx and getattr(ctx, "rtsp_url", None):
             try: self.ed_rtsp.setText(ctx.rtsp_url)
@@ -702,15 +714,23 @@ class Img2GroundModule(QtCore.QObject):
                 self._ptz_meta = meta
                 if hasattr(meta, "last"):
                     self._ptz_last = meta.last()
+                self.lbl_ptz_status.setText("PTZ: attached (shared)")
+                self._refresh_az_btn_state()
+                return
             except Exception:
                 pass
 
-        if not getattr(self, "_ptz_meta", None) and ctx and getattr(ctx, "host", None):
+        if ctx and getattr(ctx, "host", None):
             self.ed_host.setText(ctx.host or "")
             self.ed_user.setText(getattr(ctx, "user", "") or "")
             self.ed_pwd.setText(getattr(ctx, "pwd", "") or "")
             try:
-                self._connect_ptz()
+                host = getattr(ctx, "host", "") or ""
+                user = getattr(ctx, "user", "") or ""
+                pwd  = getattr(ctx, "pwd",  "") or ""
+                port = getattr(ctx, "port", 80) or 80
+                if host:
+                    self._connect_ptz_auto(host, port, user, pwd)
             except Exception as e:
                 self._log(f"Auto PTZ connect failed: {e}")
 
@@ -920,18 +940,18 @@ class Img2GroundModule(QtCore.QObject):
         onvif_port = int(self.ed_port.value())
 
         try:
-            if self._ptz:
-                self._ptz.stop()
+            if self._ptz_meta:
+                self._ptz_meta.stop()
         except Exception:
             pass
-        self._ptz = None
+        self._ptz_meta = None
 
         try:
             cgi_port = int(self.ptz_cgi_port.value())
             cgi_chan = int(self.ptz_cgi_channel.value())
             cgi_hz = float(self.ptz_cgi_poll.value())
             cgi_https = self.ptz_cgi_https.isChecked()
-            self._ptz = AnyPTZClient(
+            self._ptz_meta = AnyPTZClient(
                 host,
                 onvif_port,
                 user,
@@ -941,32 +961,76 @@ class Img2GroundModule(QtCore.QObject):
                 cgi_poll_hz=cgi_hz,
                 https=cgi_https,
             )
-            self._ptz.start()
-            if self._ptz.mode == "onvif":
+            if hasattr(self._ptz_meta, "updated"):
+                try:
+                    self._ptz_meta.updated.connect(self._on_ptz_update)
+                except Exception:
+                    pass
+            self._ptz_meta.start()
+            self.lbl_ptz_status.setText("PTZ: connecting…")
+            if getattr(self._ptz_meta, "mode", None) == "onvif":
                 self._log("PTZ: ONVIF connected")
-            elif self._ptz.mode == "cgi":
+            elif getattr(self._ptz_meta, "mode", None) == "cgi":
                 proto = "https" if cgi_https else "http"
                 self._log(f"PTZ: CGI connected ({proto})")
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "PTZ", str(e))
-            self._ptz = None
+            self._ptz_meta = None
+
+    def _connect_ptz_auto(self, host, port, user, pwd):
+        try:
+            if self._ptz_meta:
+                self._ptz_meta.stop()
+        except Exception:
+            pass
+        self._ptz_meta = AnyPTZClient(
+            host,
+            port,
+            user,
+            pwd,
+            cgi_port=int(getattr(self.ptz_cgi_port, "value", lambda: 80)()),
+            cgi_channel=int(getattr(self.ptz_cgi_channel, "value", lambda: 1)()),
+            cgi_poll_hz=float(getattr(self.ptz_cgi_poll, "value", lambda: 4.5)()),
+            https=bool(getattr(self.ptz_cgi_https, "isChecked", lambda: False)()),
+        )
+        if hasattr(self._ptz_meta, "updated"):
+            try:
+                self._ptz_meta.updated.connect(self._on_ptz_update)
+            except Exception:
+                pass
+        self._ptz_meta.start()
+        self.lbl_ptz_status.setText("PTZ: connecting…")
 
     def _poll_ptz_ui(self):
-        if not self._ptz: return
-        r = self._ptz.last(); self._ptz_last = r
+        if not self._ptz_meta:
+            return
+        try:
+            self._on_ptz_update(self._ptz_meta.last())
+        except Exception:
+            pass
+
+    def _on_ptz_update(self, last: PTZReading):
+        self._ptz_last = last
 
         def fmt(v, spec):
             return "?" if v is None else format(float(v), spec)
 
         try:
-            s = f"Pan={fmt(r.pan_deg,'.2f')}°, Tilt={fmt(r.tilt_deg,'.2f')}°, Zoom={fmt(r.zoom_norm,'.3f')}"
-            if r.zoom_mm is not None:
-                s += f", F(mm)={fmt(r.zoom_mm,'.2f')}"
+            s = f"Pan={fmt(last.pan_deg,'.2f')}°, Tilt={fmt(last.tilt_deg,'.2f')}°, Zoom={fmt(last.zoom_norm,'.3f')}"
+            if last.zoom_mm is not None:
+                s += f", F(mm)={fmt(last.zoom_mm,'.2f')}"
             self.lbl_ptz.setText(s)
         except Exception:
-            # אל תקרוס בגלל None – תציג placeholder
             self.lbl_ptz.setText("Pan=?, Tilt=?, Zoom=?, F(mm)=?")
 
+        proto = "ONVIF" if getattr(last, "via_onvif", False) else "CGI"
+        zoom_val = last.zoom_mm if getattr(last, "zoom_mm", None) is not None else getattr(last, "zoom_norm", None)
+        try:
+            self.lbl_ptz_status.setText(
+                f"PTZ: {proto} | pan={fmt(last.pan_deg,'.1f')}° tilt={fmt(last.tilt_deg,'.1f')}° zoom={fmt(zoom_val,'.2f')}"
+            )
+        except Exception:
+            pass
         self._refresh_az_btn_state()
 
     # ----- FOV calib via PTZ -----

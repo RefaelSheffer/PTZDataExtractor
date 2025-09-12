@@ -425,6 +425,10 @@ class Img2GroundModule(QtCore.QObject):
             pass
         self._t = QtCore.QTimer(self._root); self._t.timeout.connect(self._update_metrics); self._t.start(800)
         self._ptz_timer = QtCore.QTimer(self._root); self._ptz_timer.timeout.connect(self._poll_ptz_ui); self._ptz_timer.start(400)
+        self._az_btn_timer = QtCore.QTimer(self._root)
+        self._az_btn_timer.setInterval(800)
+        self._az_btn_timer.timeout.connect(self._refresh_az_btn_state)
+        self._az_btn_timer.start()
         shared_state.signal_camera_changed.connect(self._on_active_camera_changed)
         shared_state.signal_stream_mode_changed.connect(self._on_stream_mode_changed)
         shared_state.signal_camera_changed.connect(
@@ -1035,17 +1039,32 @@ class Img2GroundModule(QtCore.QObject):
 
     # ----- FOV calib via PTZ -----
     def _get_pan_now(self):
-        # 1) מקומי
-        if getattr(self, "_ptz_last", None) and getattr(self._ptz_last, "pan_deg", None) is not None:
-            return float(self._ptz_last.pan_deg)
-        # 2) גלובלי רץ מהטאב Cameras
-        meta = getattr(app_state, "ptz_meta", None)
+        # 1) מקומי (אם התחברנו ל-PTZ מהטאב הזה)
         try:
-            last = meta.last() if hasattr(meta, "last") else meta
-            if last and (getattr(last, "pan_deg", None) is not None or (isinstance(last, dict) and last.get("pan_deg") is not None)):
-                return float(getattr(last, "pan_deg", last["pan_deg"]))
+            ptz = getattr(self, "_ptz", None) or getattr(self, "_ptz_meta", None)
+            if ptz:
+                r = ptz.last()
+                if r and getattr(r, "pan_deg", None) is not None:
+                    return float(r.pan_deg)
         except Exception:
             pass
+        if getattr(self, "_ptz_last", None) and getattr(self._ptz_last, "pan_deg", None) is not None:
+            return float(self._ptz_last.pan_deg)
+
+        # 2) גלובלי – יכול להיות dict או אובייקט עם last()
+        meta = getattr(app_state, "ptz_meta", None)
+        if meta is not None:
+            try:
+                last = meta.last() if hasattr(meta, "last") else meta
+            except Exception:
+                last = meta
+            try:
+                pan = (last.get("pan_deg") if isinstance(last, dict) else getattr(last, "pan_deg", None))
+                if pan is not None:
+                    return float(pan)
+            except Exception:
+                pass
+
         # 3) מה-context (אם נשמר שם)
         ctx = getattr(app_state, "current_camera", None)
         if ctx and getattr(ctx, "pan_deg", None) is not None:

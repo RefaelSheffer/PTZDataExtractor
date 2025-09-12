@@ -1072,8 +1072,11 @@ class Img2GroundModule(QtCore.QObject):
         return None
 
     def _refresh_az_btn_state(self):
+        pan_from_client = getattr(getattr(self, "_ptz_last", None), "pan_deg", None)
+        pan_meta = (getattr(shared_state, "ptz_meta", None) or {}).get("pan_deg")
         self.btn_az_from_ortho.setEnabled(
-            self._ortho_layer is not None and self._get_pan_now() is not None
+            self._ortho_layer
+            and (pan_from_client is not None or pan_meta is not None)
         )
 
     def _calibrate_fov_with_ptz(self):
@@ -1160,6 +1163,7 @@ class Img2GroundModule(QtCore.QObject):
             if last:
                 setattr(ctx, "tilt_at_level_deg", getattr(last, "tilt_deg", None))
                 setattr(ctx, "zoom_at_level", getattr(last, "zoom", None))
+            shared_state.signal_camera_changed.emit(ctx)
         self.lbl_status.setText(f"Level applied: roll_offset={-roll:.2f}°, pitch≈{pitch:.2f}°")
         QtWidgets.QMessageBox.information(None, "Level from horizon",
             f"Applied offsets:\nRoll: {-roll:.2f}°\nPitch≈ {pitch:.2f}°")
@@ -1219,6 +1223,7 @@ class Img2GroundModule(QtCore.QObject):
         ctx = getattr(app_state, "current_camera", None)
         if ctx is not None:
             setattr(ctx, "yaw_offset_deg", getattr(ctx, "yaw_offset_deg", 0.0) + self._yaw_offset_deg)
+            shared_state.signal_camera_changed.emit(ctx)
         self.lbl_status.setText(f"Azimuth offset={self._yaw_offset_deg:.2f}° (bearing {yaw_avg:.2f}°)")
         QtWidgets.QMessageBox.information(None, "Azimuth from ortho",
             f"Bearing to point: {yaw_avg:.2f}°\nPan now: {pan_now:.2f}°\nApplied yaw offset: {self._yaw_offset_deg:.2f}°")

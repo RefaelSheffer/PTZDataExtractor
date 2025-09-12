@@ -421,7 +421,7 @@ class PrepModule(QtCore.QObject):
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 
     def _publish_layers(self, ortho: Optional[str] = None, dtm: Optional[str] = None, srs: Optional[str] = None) -> None:
-        alias = getattr(app_state.current_camera, "alias", "default")
+        alias = getattr(app_state.current_camera, "alias", None) or "(default)"
         layers = shared_state.layers_for_camera.get(alias, {}).copy()
         if ortho is None:
             ortho = shared_state.orthophoto_path or (self.ed_ortho.text().strip() or None)

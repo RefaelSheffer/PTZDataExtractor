@@ -21,13 +21,18 @@ class MapView(QtWidgets.QGraphicsView):
 
     # --- helper to fit the whole scene into view (called after loading ortho/DTM)
     def fit(self, margin: int = 20) -> None:
-        sc = self.scene()
-        if not sc:
-            return
-        rect = sc.itemsBoundingRect()
-        if not rect.isNull():
+        """Fit view to current scene safely."""
+        try:
+            sc = self.scene()
+            if not sc:
+                return
+            rect = sc.itemsBoundingRect()
+            if rect.isNull():
+                return
             rect = rect.adjusted(-margin, -margin, margin, margin)
             self.fitInView(rect, QtCore.Qt.KeepAspectRatio)
+        except Exception:
+            pass
 
     def wheelEvent(self, e: QtGui.QWheelEvent):
         angle = e.angleDelta().y()

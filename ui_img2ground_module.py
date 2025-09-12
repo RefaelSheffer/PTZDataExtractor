@@ -537,7 +537,9 @@ class Img2GroundModule(QtCore.QObject):
         self.btn_level_horizon.setToolTip("לחץ 2 נק’ על קו האופק בתמונה כדי לאפס roll/pitch.")
         self.btn_level_horizon.clicked.connect(self._calibrate_from_horizon)
         self.btn_az_from_ortho = QtWidgets.QPushButton("Azimuth from ortho…")
-        self.btn_az_from_ortho.setToolTip("בחר נקודה/ות באורתו שהמצלמה מביטה אליהן. ההיסט אזימוט יחושב מול ה-pan החי.")
+        self._az_tip_ready = "בחר נקודה/ות באורתו שהמצלמה מביטה אליהן. ההיסט אזימוט יחושב מול ה-pan החי."
+        self._az_tip_wait = "מחכה ל-PTZ / טען Ortho"
+        self.btn_az_from_ortho.setToolTip(self._az_tip_ready)
         self.btn_az_from_ortho.clicked.connect(self._calibrate_azimuth_from_ortho)
         gls.addWidget(self.btn_level_horizon); gls.addWidget(self.btn_az_from_ortho)
         g.addWidget(grp_simple, r, 0, 1, 8); r += 1
@@ -1127,9 +1129,12 @@ class Img2GroundModule(QtCore.QObject):
         self._set_ready_lbl(self._lbl_ready_pan, pan_ok, "PTZ pan")
         self._set_ready_lbl(self._lbl_ready_intr, intr_ok, "Intrinsics")
         all_ok = ortho_ok and cam_ok and pan_ok and intr_ok
+        az_ok = ortho_ok and cam_ok and pan_ok
         self.btn_level_horizon.setEnabled(all_ok)
-        self.btn_az_from_ortho.setEnabled(all_ok)
         self.btn_fov_cal.setEnabled(all_ok)
+        self.btn_az_from_ortho.setEnabled(az_ok)
+        tip = self._az_tip_ready if az_ok else self._az_tip_wait
+        self.btn_az_from_ortho.setToolTip(tip)
 
     def _calibrate_fov_with_ptz(self):
         """Calibrate yaw offset and FOV using PTZ telemetry.

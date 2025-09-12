@@ -696,6 +696,8 @@ class Img2GroundModule(QtCore.QObject):
     def _on_vlc_playing(self):
         self._log("VLC: Playing")
         self._refresh_level_btn_state()
+        self._refresh_readiness()
+        self._refresh_az_btn_state()
 
     def _update_mode_enabled(self):
         on = self.rb_online.isChecked()
@@ -886,6 +888,7 @@ class Img2GroundModule(QtCore.QObject):
             self._remove_last_pick(); self._remove_video_frame_outline(); self._remove_fov_wedge()
             self._refresh_readiness()
             self._refresh_az_btn_state()
+            self._refresh_level_btn_state()
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 
@@ -938,9 +941,9 @@ class Img2GroundModule(QtCore.QObject):
             pass
         self.ed_dtm.setText(str(dtm) if dtm else "")
         self.ed_ortho.setText(str(ortho) if ortho else "")
-        QtCore.QTimer.singleShot(0, self._refresh_readiness)
-        QtCore.QTimer.singleShot(0, self._refresh_az_btn_state)
-        QtCore.QTimer.singleShot(0, self._refresh_level_btn_state)
+        self._refresh_readiness()
+        self._refresh_az_btn_state()
+        self._refresh_level_btn_state()
 
     def _open_prep_tab(self):
         QtWidgets.QMessageBox.information(None, "Preparation", "Load DTM/Orthophoto in the Preparation tab.")

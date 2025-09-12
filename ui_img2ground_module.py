@@ -1089,7 +1089,7 @@ class Img2GroundModule(QtCore.QObject):
         pan_from_client = getattr(getattr(self, "_ptz_last", None), "pan_deg", None)
         pan_meta = (getattr(shared_state, "ptz_meta", None) or {}).get("pan_deg")
         self.btn_az_from_ortho.setEnabled(
-            self._ortho_layer
+            (self._ortho_layer is not None)
             and (pan_from_client is not None or pan_meta is not None)
         )
 

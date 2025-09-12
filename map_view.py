@@ -20,12 +20,13 @@ class MapView(QtWidgets.QGraphicsView):
         self._pan_start = QtCore.QPoint()
 
     # --- helper to fit the whole scene into view (called after loading ortho/DTM)
-    def fit(self) -> None:
+    def fit(self, margin: int = 20) -> None:
         sc = self.scene()
         if not sc:
             return
         rect = sc.itemsBoundingRect()
         if not rect.isNull():
+            rect = rect.adjusted(-margin, -margin, margin, margin)
             self.fitInView(rect, QtCore.Qt.KeepAspectRatio)
 
     def wheelEvent(self, e: QtGui.QWheelEvent):

@@ -53,19 +53,6 @@ class UserTab(QtWidgets.QWidget):
         self.cmb_mapping.addItems(["Auto (prefer Homography)", "Homography only", "PTZ+DTM only"])
         bar.addWidget(self.cmb_mapping)
 
-        # ----- layer selectors -----
-        self.dtm_edit = QtWidgets.QLineEdit()
-        self.ortho_edit = QtWidgets.QLineEdit()
-        btn_load = QtWidgets.QPushButton("Override…")
-        btn_load_ortho = QtWidgets.QPushButton("Load Orthophoto…")
-        hrow = QtWidgets.QHBoxLayout()
-        hrow.addWidget(QtWidgets.QLabel("DTM:"))
-        hrow.addWidget(self.dtm_edit, 1)
-        hrow.addWidget(QtWidgets.QLabel("Ortho:"))
-        hrow.addWidget(self.ortho_edit, 1)
-        hrow.addWidget(btn_load_ortho)
-        hrow.addWidget(btn_load)
-
         # ----- video + map -----
         self.video_container = QtWidgets.QFrame()
         self.video_container.setLayout(QtWidgets.QVBoxLayout())
@@ -81,7 +68,6 @@ class UserTab(QtWidgets.QWidget):
         # ----- layout -----
         vbox = QtWidgets.QVBoxLayout(self)
         vbox.addWidget(bar)
-        vbox.addLayout(hrow)
         self.lbl_calib = QtWidgets.QLabel("Calibration: N/A")
         vbox.addWidget(self.lbl_calib)
         vbox.addWidget(splitter, 1)
@@ -91,9 +77,6 @@ class UserTab(QtWidgets.QWidget):
         self.act_az.triggered.connect(self.on_toggle_azimuth)
         self.act_copy.triggered.connect(self.on_copy_gmaps)
         self.act_qr.triggered.connect(self.on_make_qr)
-        btn_load.clicked.connect(self.on_load_layers)
-        btn_load_ortho.clicked.connect(self.on_load_ortho)
-
         bus.signal_camera_changed.connect(self._on_active_camera_changed)
         shared_state.signal_camera_changed.connect(
             lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None))
@@ -150,9 +133,7 @@ class UserTab(QtWidgets.QWidget):
 
     # ------------------------------------------------------------------
     # Layers
-    def on_load_layers(self, *, broadcast: bool = True) -> None:
-        dtm = self.dtm_edit.text().strip()
-        ortho = self.ortho_edit.text().strip()
+    def on_load_layers(self, dtm: str | None, ortho: str | None) -> None:
         shared_state.dtm_path = dtm or None
         shared_state.orthophoto_path = ortho or None
         try:
@@ -170,21 +151,8 @@ class UserTab(QtWidgets.QWidget):
             if dtm:
                 self._dtm_path = dtm
             self._toast("Layers loaded")
-            if broadcast:
-                self._update_shared_layers()
-                if self._ortho_layer is not None:
-                    bus.signal_ortho_changed.emit(self._ortho_layer)
         except Exception as e:  # pragma: no cover - UI feedback
             self._toast(f"Layer load failed: {e}", error=True)
-
-    def on_load_ortho(self) -> None:
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Open Orthophoto (GeoTIFF)", "", "GeoTIFF (*.tif *.tiff);;All files (*.*)"
-        )
-        if not path:
-            return
-        self.ortho_edit.setText(path)
-        self.on_load_layers()
 
     def _on_active_camera_changed(self, ctx):
         if not ctx:
@@ -192,22 +160,10 @@ class UserTab(QtWidgets.QWidget):
         self.mount_video_preview()
         layers = getattr(ctx, "layers", None)
         if layers:
-            self.dtm_edit.setText(layers.get("dtm", ""))
-            self.ortho_edit.setText(layers.get("ortho", ""))
-            self.on_load_layers(broadcast=False)
+            self._apply_layers(layers)
         calib = getattr(ctx, "calibration", None)
         if calib:
             self._fill_calibration_ui(calib)
-
-    def _update_shared_layers(self) -> None:
-        alias = getattr(app_state.current_camera, "alias", "default")
-        layers = {"dtm": self.dtm_edit.text().strip() or None,
-                  "ortho": self.ortho_edit.text().strip() or None,
-                  "srs": None}
-        if app_state.current_camera:
-            app_state.current_camera.layers = layers
-        shared_state.layers_for_camera[alias] = layers
-        shared_state.signal_layers_changed.emit(alias, layers)
 
     def _on_layers_changed(self, alias: str, layers: dict) -> None:
         if alias == getattr(app_state.current_camera, "alias", None):
@@ -223,9 +179,7 @@ class UserTab(QtWidgets.QWidget):
     def _apply_layers(self, layers: dict) -> None:
         dtm = self._resolve_path(layers.get("dtm"))
         ortho = self._resolve_path(layers.get("ortho"))
-        self.dtm_edit.setText(dtm or "")
-        self.ortho_edit.setText(ortho or "")
-        self.on_load_layers(broadcast=False)
+        self.on_load_layers(dtm, ortho)
 
     def _resolve_path(self, p: str | None) -> str | None:
         if not p:

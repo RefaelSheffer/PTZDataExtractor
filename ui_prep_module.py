@@ -55,6 +55,13 @@ class PrepModule(QtCore.QObject):
         lay.addWidget(self.ed_dtm, r, 1, 1, 2)
         lay.addWidget(btn_browse, r, 3); r += 1
 
+        self.ed_ortho = QtWidgets.QLineEdit()
+        btn_browse_ortho = QtWidgets.QPushButton("Browse Ortho…")
+        btn_browse_ortho.clicked.connect(self._browse_ortho)
+        lay.addWidget(QtWidgets.QLabel("Ortho:"), r, 0)
+        lay.addWidget(self.ed_ortho, r, 1, 1, 2)
+        lay.addWidget(btn_browse_ortho, r, 3); r += 1
+
         self.btn_read_epsg = QtWidgets.QPushButton("Read EPSG from DTM")
         self.btn_center_origin = QtWidgets.QPushButton("Origin = DEM center")
         self.btn_read_epsg.clicked.connect(self._read_epsg_from_dtm)
@@ -166,6 +173,13 @@ class PrepModule(QtCore.QObject):
         shared_state.dtm_path = path
         self._ensure_base_map()
         self._publish_layers(dtm=path)
+
+    def _browse_ortho(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(None, "Open Ortho (GeoTIFF)", "", "GeoTIFF (*.tif *.tiff);;All files (*.*)")
+        if not path:
+            return
+        self.ed_ortho.setText(path)
+        self._load_orthophoto_path(path)
 
     def _read_epsg_from_dtm(self):
         try:
@@ -364,6 +378,7 @@ class PrepModule(QtCore.QObject):
                 QtWidgets.QMessageBox.warning(None, "DTM", f"Failed to load DTM: {e}")
             self._publish_layers(dtm=dtm_path)
         if ortho_path:
+            self.ed_ortho.setText(ortho_path)
             self._load_orthophoto_path(ortho_path)
 
     def _load_orthophoto_path(self, path: str, *, broadcast: bool = True):
@@ -409,7 +424,7 @@ class PrepModule(QtCore.QObject):
         alias = getattr(app_state.current_camera, "alias", "default")
         layers = shared_state.layers_for_camera.get(alias, {}).copy()
         if ortho is None:
-            ortho = shared_state.orthophoto_path
+            ortho = shared_state.orthophoto_path or (self.ed_ortho.text().strip() or None)
         if dtm is None:
             dtm = self.ed_dtm.text().strip() or None
         if srs is None:
@@ -459,6 +474,7 @@ class PrepModule(QtCore.QObject):
             self._map_layer = None
             self._ensure_base_map()
         if ortho:
+            self.ed_ortho.setText(ortho)
             self._load_orthophoto_path(ortho, broadcast=False)
 
     def _resolve_path(self, p: str | None) -> str | None:

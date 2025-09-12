@@ -33,7 +33,6 @@ class PrepModule(QtCore.QObject):
             lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None))
         )
         shared_state.signal_layers_changed.connect(self._on_layers_changed)
-        bus.signal_ortho_changed.connect(self.apply_ortho)
 
     def widget(self) -> QtWidgets.QWidget:
         return self._root
@@ -393,7 +392,8 @@ class PrepModule(QtCore.QObject):
             self.apply_ortho(layer)
             if broadcast:
                 self._publish_layers(ortho=path)
-                bus.signal_ortho_changed.emit(layer)
+                alias = getattr(app_state.current_camera, "alias", None) or "(default)"
+                bus.signal_ortho_changed.emit(alias, layer)
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 

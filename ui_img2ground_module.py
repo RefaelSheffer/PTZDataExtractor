@@ -27,6 +27,7 @@ from ui_common import VlcVideoWidget
 from ui_calibration_module import HorizonAzimuthCalibrationDialog
 import shared_state
 from app_state import app_state
+from event_bus import bus
 
 from any_ptz_client import AnyPTZClient
 from onvif_ptz import PTZReading
@@ -435,6 +436,7 @@ class Img2GroundModule(QtCore.QObject):
             lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None))
         )
         shared_state.signal_layers_changed.connect(self._on_layers_changed)
+        bus.signal_ortho_changed.connect(self.apply_ortho)
         if app_state.current_camera:
             self.use_active_camera(force=True)
         self._on_stream_mode_changed(getattr(app_state, "stream_mode", "online"))
@@ -483,16 +485,15 @@ class Img2GroundModule(QtCore.QObject):
 
         # ortho tools
         rowm = QtWidgets.QHBoxLayout()
-        self.btn_load_ortho = QtWidgets.QPushButton("Load Orthophoto…"); self.btn_load_ortho.clicked.connect(self._load_orthophoto)
-        self.btn_use_shared = QtWidgets.QPushButton("Use Orthophoto from Preparation"); self.btn_use_shared.clicked.connect(self._try_load_shared_ortho)
         self.btn_reset = QtWidgets.QPushButton("Reset calibration"); self.btn_reset.clicked.connect(self._reset_calibration)
         self.btn_advanced = QtWidgets.QToolButton(); self.btn_advanced.setText("Advanced ▾")
         menu_adv = QtWidgets.QMenu(self.btn_advanced)
         act_homo = menu_adv.addAction("Homography calibration…"); act_homo.triggered.connect(self._run_homography_dialog)
         act_manual = menu_adv.addAction("Manual calibration dialog…"); act_manual.triggered.connect(self._open_calib_tools)
         self.btn_advanced.setMenu(menu_adv); self.btn_advanced.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        rowm.addWidget(self.btn_load_ortho); rowm.addWidget(self.btn_use_shared); rowm.addWidget(self.btn_advanced)
-        rowm.addStretch(1); rowm.addWidget(self.btn_reset)
+        rowm.addWidget(self.btn_advanced)
+        rowm.addStretch(1)
+        rowm.addWidget(self.btn_reset)
         g.addLayout(rowm, r, 0, 1, 8); r += 1
 
         # simple calibration group
@@ -811,15 +812,10 @@ class Img2GroundModule(QtCore.QObject):
             self._load_orthophoto(path, broadcast=False)
         self._refresh_az_btn_state()
 
-    def _load_orthophoto(self, path: Optional[str] = None, *, broadcast: bool = True):
-        if not path:
-            path, _ = QtWidgets.QFileDialog.getOpenFileName(None, "Open Orthophoto (GeoTIFF)", "",
-                                                            "GeoTIFF (*.tif *.tiff);;All files (*.*)")
-            if not path:
-                return
+    def apply_ortho(self, layer: RasterLayer) -> None:
         try:
-            self._ortho_layer = RasterLayer(path, max_size=2048)
-            img = numpy_to_qimage(self._ortho_layer.downsampled_image())
+            self._ortho_layer = layer
+            img = numpy_to_qimage(layer.downsampled_image())
             pix = QtGui.QPixmap.fromImage(img)
             sc = self._ensure_scene(); sc.clear()
             self._ortho_pix = QtWidgets.QGraphicsPixmapItem(pix); self._ortho_pix.setZValue(0); sc.addItem(self._ortho_pix)
@@ -828,11 +824,25 @@ class Img2GroundModule(QtCore.QObject):
                 self._map.fit()
             except Exception:
                 pass
-            self._log(f"Orthophoto loaded (EPSG={self._ortho_layer.ds.crs.to_epsg()})")
+            shared_state.orthophoto_path = layer.path
+            self._log(f"Orthophoto loaded (EPSG={layer.ds.crs.to_epsg()})")
             self._remove_last_pick(); self._remove_video_frame_outline(); self._remove_fov_wedge()
+            self._refresh_az_btn_state()
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
+
+    def _load_orthophoto(self, path: Optional[str] = None, *, broadcast: bool = True):
+        if not path:
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(None, "Open Orthophoto (GeoTIFF)", "",
+                                                            "GeoTIFF (*.tif *.tiff);;All files (*.*)")
+            if not path:
+                return
+        try:
+            layer = RasterLayer(path, max_size=2048)
+            self.apply_ortho(layer)
             if broadcast:
                 self._update_shared_layers()
-            self._refresh_az_btn_state()
+                bus.signal_ortho_changed.emit(layer)
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 

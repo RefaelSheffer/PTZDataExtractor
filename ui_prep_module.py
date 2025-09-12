@@ -11,6 +11,7 @@ from camera_models import save_bundle, list_bundles
 from geom3d import CameraIntrinsics, CameraPose, GeoRef, geographic_to_local
 from app_state import app_state
 import shared_state
+from event_bus import bus
 
 
 class PrepModule(QtCore.QObject):
@@ -31,6 +32,7 @@ class PrepModule(QtCore.QObject):
             lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None))
         )
         shared_state.signal_layers_changed.connect(self._on_layers_changed)
+        bus.signal_ortho_changed.connect(self.apply_ortho)
 
     def widget(self) -> QtWidgets.QWidget:
         return self._root
@@ -110,11 +112,10 @@ class PrepModule(QtCore.QObject):
         lay.addWidget(self.map, r, 0, 1, 4); r += 1
 
         row = QtWidgets.QHBoxLayout()
-        btn_load_ortho = QtWidgets.QPushButton("Load Orthophoto…"); btn_load_ortho.clicked.connect(self._load_orthophoto)
         self.chk_auto_z = QtWidgets.QCheckBox("Auto Z from DTM"); self.chk_auto_z.setChecked(True)
         self.chk_show_dtm = QtWidgets.QCheckBox("Show DTM"); self.chk_show_dtm.setChecked(True); self.chk_show_dtm.toggled.connect(self._update_layer_visibility)
         self.chk_show_ortho = QtWidgets.QCheckBox("Show Ortho"); self.chk_show_ortho.setChecked(True); self.chk_show_ortho.toggled.connect(self._update_layer_visibility)
-        row.addWidget(btn_load_ortho); row.addStretch(1); row.addWidget(self.chk_auto_z); row.addWidget(self.chk_show_dtm); row.addWidget(self.chk_show_ortho)
+        row.addStretch(1); row.addWidget(self.chk_auto_z); row.addWidget(self.chk_show_dtm); row.addWidget(self.chk_show_ortho)
         lay.addLayout(row, r, 0, 1, 4); r += 1
 
         self.map.clicked.connect(self._map_clicked)
@@ -241,34 +242,6 @@ class PrepModule(QtCore.QObject):
             except Exception as e:
                 self._log(f"Failed to load base DTM map: {e}")
         self._update_layer_visibility()
-
-    def _load_orthophoto(self, *, broadcast: bool = True):
-        try:
-            from raster_layer import RasterLayer
-            from ui_map_tools import numpy_to_qimage
-        except Exception as e:
-            QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Missing map tools: {e}"); return
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(None, "Open Orthophoto (GeoTIFF)", "", "GeoTIFF (*.tif *.tiff);;All files (*.*)")
-        if not path:
-            return
-        try:
-            self._ortho_layer = RasterLayer(path, max_size=2048)
-            img = numpy_to_qimage(self._ortho_layer.downsampled_image())
-            pix = QtGui.QPixmap.fromImage(img)
-            sc = self._ensure_scene()
-            if self._ortho_pixmap is None:
-                self._ortho_pixmap = QtWidgets.QGraphicsPixmapItem(pix)
-                self._ortho_pixmap.setZValue(1)
-                sc.addItem(self._ortho_pixmap)
-            else:
-                self._ortho_pixmap.setPixmap(pix)
-            shared_state.orthophoto_path = path
-            self._update_layer_visibility()
-            self._log(f"Orthophoto loaded (EPSG={self._ortho_layer.ds.crs.to_epsg()})")
-            if broadcast:
-                self._update_shared_layers()
-        except Exception as e:
-            QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 
     def _update_layer_visibility(self):
         if self._dtm_pixmap is not None:
@@ -397,8 +370,23 @@ class PrepModule(QtCore.QObject):
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Missing map tools: {e}")
             return
         try:
-            self._ortho_layer = RasterLayer(path, max_size=2048)
-            img = numpy_to_qimage(self._ortho_layer.downsampled_image())
+            layer = RasterLayer(path, max_size=2048)
+            self.apply_ortho(layer)
+            if broadcast:
+                self._update_shared_layers()
+                bus.signal_ortho_changed.emit(layer)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
+
+    def apply_ortho(self, layer) -> None:
+        try:
+            from ui_map_tools import numpy_to_qimage
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Missing map tools: {e}")
+            return
+        try:
+            self._ortho_layer = layer
+            img = numpy_to_qimage(layer.downsampled_image())
             pix = QtGui.QPixmap.fromImage(img)
             sc = self._ensure_scene()
             if self._ortho_pixmap is None:
@@ -407,11 +395,9 @@ class PrepModule(QtCore.QObject):
                 sc.addItem(self._ortho_pixmap)
             else:
                 self._ortho_pixmap.setPixmap(pix)
-            shared_state.orthophoto_path = path
+            shared_state.orthophoto_path = layer.path
             self._update_layer_visibility()
-            self._log(f"Orthophoto loaded (EPSG={self._ortho_layer.ds.crs.to_epsg()})")
-            if broadcast:
-                self._update_shared_layers()
+            self._log(f"Orthophoto loaded (EPSG={layer.ds.crs.to_epsg()})")
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 

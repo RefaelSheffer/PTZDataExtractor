@@ -3,6 +3,7 @@
 """Unified PTZ client with ONVIF→CGI fallback."""
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from onvif_ptz import OnvifPTZClient, PTZReading
@@ -61,24 +62,30 @@ class AnyPTZClient:
             )
             self._client.start()
             self.mode = "onvif"
+            self.poll_dt = getattr(self._client, "poll_dt", 1.0)
+            empty = True
+            for i in range(5):
+                time.sleep(self.poll_dt)
+                r = self._client.last()
+                if (
+                    getattr(r, "pan_deg", None) is not None
+                    or getattr(r, "tilt_deg", None) is not None
+                    or getattr(r, "zoom_norm", None) is not None
+                    or getattr(r, "zoom_mm", None) is not None
+                ):
+                    empty = False
+                    if i >= 2:
+                        break
+            if empty:
+                print("ONVIF telemetry empty → CGI")
+                self.switch_to_cgi()
         except Exception as e_onvif:  # pragma: no cover - exceptional path
             try:
-                self._client = PtzCgiThread(
-                    self.host,
-                    self.cgi_port,
-                    self.user,
-                    self.pwd,
-                    channel=self.cgi_channel,
-                    poll_hz=self.cgi_poll_hz,
-                    https=self.https,
-                )
-                self._client.start()
-                self.mode = "cgi"
+                self.switch_to_cgi()
             except Exception as e_cgi:
                 raise RuntimeError(
                     f"Failed ONVIF ({e_onvif}); CGI fallback failed ({e_cgi})"
                 )
-        self.poll_dt = getattr(self._client, "poll_dt", 1.0)
 
     def stop(self) -> None:
         if self._client:
@@ -92,3 +99,24 @@ class AnyPTZClient:
         if self._client:
             return self._client.last()
         return PTZReading()
+
+    # ----- internal helpers -----
+    def switch_to_cgi(self) -> None:
+        """Switch polling to CGI fallback."""
+        if self._client:
+            try:
+                self._client.stop()
+            except Exception:
+                pass
+        self._client = PtzCgiThread(
+            self.host,
+            self.cgi_port,
+            self.user,
+            self.pwd,
+            channel=self.cgi_channel,
+            poll_hz=self.cgi_poll_hz,
+            https=self.https,
+        )
+        self._client.start()
+        self.mode = "cgi"
+        self.poll_dt = getattr(self._client, "poll_dt", 1.0)

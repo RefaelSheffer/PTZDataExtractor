@@ -37,3 +37,4 @@ signal_stream_mode_changed = _state.signal_stream_mode_changed
 signal_camera_changed = _state.signal_camera_changed
 signal_layers_changed = _state.signal_layers_changed
 layers_for_camera = _state.layers_for_camera
+shared_state = _state

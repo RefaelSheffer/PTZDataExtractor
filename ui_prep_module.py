@@ -4,6 +4,7 @@
 
 from pathlib import Path
 import math
+from typing import Optional
 from PySide6 import QtCore, QtWidgets, QtGui
 import vlc
 
@@ -164,7 +165,7 @@ class PrepModule(QtCore.QObject):
         self.ed_dtm.setText(path)
         shared_state.dtm_path = path
         self._ensure_base_map()
-        self._update_shared_layers()
+        self._publish_layers(dtm=path)
 
     def _read_epsg_from_dtm(self):
         try:
@@ -180,8 +181,10 @@ class PrepModule(QtCore.QObject):
             else:
                 self._log("DTM EPSG not found in file.")
             d.close()
+            self._publish_layers(srs=str(epsg) if epsg else None)
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "DTM", f"Failed to read EPSG: {e}")
+            self._publish_layers()
 
     def _origin_from_dem_center(self):
         try:
@@ -359,6 +362,7 @@ class PrepModule(QtCore.QObject):
                 self._ensure_base_map()
             except Exception as e:
                 QtWidgets.QMessageBox.warning(None, "DTM", f"Failed to load DTM: {e}")
+            self._publish_layers(dtm=dtm_path)
         if ortho_path:
             self._load_orthophoto_path(ortho_path)
 
@@ -373,7 +377,7 @@ class PrepModule(QtCore.QObject):
             layer = RasterLayer(path, max_size=2048)
             self.apply_ortho(layer)
             if broadcast:
-                self._update_shared_layers()
+                self._publish_layers(ortho=path)
                 bus.signal_ortho_changed.emit(layer)
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
@@ -401,21 +405,38 @@ class PrepModule(QtCore.QObject):
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 
-    def _update_shared_layers(self) -> None:
+    def _publish_layers(self, ortho: Optional[str] = None, dtm: Optional[str] = None, srs: Optional[str] = None) -> None:
         alias = getattr(app_state.current_camera, "alias", "default")
-        dtm = self.ed_dtm.text().strip() or None
-        srs = None
+        layers = shared_state.layers_for_camera.get(alias, {}).copy()
+        if ortho is None:
+            ortho = shared_state.orthophoto_path
+        if dtm is None:
+            dtm = self.ed_dtm.text().strip() or None
+        if srs is None:
+            try:
+                if self._map_layer and self._map_layer.ds.crs:
+                    epsg = self._map_layer.ds.crs.to_epsg()
+                    if epsg:
+                        srs = f"EPSG:{epsg}"
+            except Exception:
+                pass
+        if ortho is not None:
+            layers["ortho"] = ortho
+        if dtm is not None:
+            layers["dtm"] = dtm
+        if srs is not None:
+            layers["srs"] = srs
+        shared_state.layers_for_camera[alias] = layers
         try:
-            if self._map_layer and self._map_layer.ds.crs:
-                epsg = self._map_layer.ds.crs.to_epsg()
-                if epsg:
-                    srs = f"EPSG:{epsg}"
+            if app_state.current_camera:
+                app_state.current_camera.layers = layers
+            proj = getattr(app_state, "project", None)
+            if proj is not None:
+                d = getattr(proj, "layers_for_camera", {}) or {}
+                d[alias] = layers
+                proj.layers_for_camera = d
         except Exception:
             pass
-        layers = {"ortho": shared_state.orthophoto_path, "dtm": dtm, "srs": srs}
-        if app_state.current_camera:
-            app_state.current_camera.layers = layers
-        shared_state.layers_for_camera[alias] = layers
         shared_state.signal_layers_changed.emit(alias, layers)
 
     def _on_layers_changed(self, alias: str, layers: dict) -> None:

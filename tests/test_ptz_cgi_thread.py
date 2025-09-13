@@ -28,3 +28,11 @@ def test_ptz_cgi_thread_shared_state():
     assert meta["focus_pos"] == 3.0
     assert meta.get("cgi_last", {}).get("pan_deg") == 1.0
     assert th.last().focus_pos == 3.0
+
+
+def test_ptz_cgi_urls_try_channel_and_without():
+    th = PtzCgiThread("host", 80, "u", "p", channel=1)
+    urls = th._urls
+    base = "http://host:80/cgi-bin/ptz.cgi?action=getStatus"
+    assert base in urls
+    assert base + "&channel=1" in urls

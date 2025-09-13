@@ -39,7 +39,7 @@ class PtzCgiThread:
         port: int,
         user: str,
         pwd: str,
-        channel: int = 1,
+        channel: Optional[int] = 1,
         poll_hz: float = 5.0,
         https: bool = False,
         csv_path: Optional[str] = None,
@@ -54,14 +54,15 @@ class PtzCgiThread:
         self._csv_path = csv_path
 
         proto = "https" if https else "http"
-        urls = [
+        base_urls = [
             f"{proto}://{host}:{port}/cgi-bin/ptz.cgi?action=getStatus",
             f"{proto}://{host}:{port}/ptz.cgi?action=getStatus",
             f"{proto}://{host}:{port}/cgi-bin/ptz?action=getStatus",
             f"{proto}://{host}:{port}/ptz?action=getStatus",
         ]
+        urls = base_urls.copy()
         if channel is not None:
-            urls = [u + f"&channel={int(channel)}" for u in urls]
+            urls = [u + f"&channel={int(channel)}" for u in base_urls] + urls
         self._urls = urls
         self._url_index = 0
 

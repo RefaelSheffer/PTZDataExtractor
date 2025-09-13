@@ -194,6 +194,8 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
         self.log(f"Project loaded -> {path}")
+        # attempt automatic camera connection using Try Dahua
+        QtCore.QTimer.singleShot(0, self.cam_module._auto_try_dahua)
 
     # ------- global logging -------
     @QtCore.Slot(str)

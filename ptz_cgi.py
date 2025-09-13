@@ -3,9 +3,6 @@
 """Simple PTZ polling via Dahua-style CGI."""
 from __future__ import annotations
 
-import csv
-import json
-import re
 import threading
 import time
 from dataclasses import dataclass
@@ -17,6 +14,9 @@ from urllib.request import (
     Request,
     build_opener,
 )
+
+from parser_dahua import parse_cgi_status
+from ptz_csv_logger import log_ptz_row
 
 from onvif_ptz import PTZReading
 
@@ -153,85 +153,93 @@ class PtzCgiThread:
         return x
 
     def _parse(self, txt: str) -> _Status:
-        txt = txt.strip()
-        data = {}
-        if txt.startswith("{"):
-            try:
-                data = json.loads(txt)
-            except Exception:
-                data = {}
-        else:
-            for k, v in re.findall(r"(\w+)=([^\s&]+)", txt):
-                data[k.lower()] = v
-        pan = self._to_deg(data.get("pan"), "pan")
-        tilt = self._to_deg(data.get("tilt"), "tilt")
-        zoom_raw = self._to_deg(data.get("zoom"), "zoom")
+        """Parse CGI text using a tolerant Dahua parser."""
+        parsed = parse_cgi_status(txt)
+        pan = self._to_deg(parsed.get("pan"), "pan")
+        tilt = self._to_deg(parsed.get("tilt"), "tilt")
+        zoom_raw = self._to_deg(parsed.get("zoom"), "zoom")
         zoom = self._normalize_zoom(zoom_raw)
-        focus = self._to_deg(data.get("focus"), "zoom")
+        # focus is not included in the Dahua status keys; attempt best effort
+        focus = self._to_deg(parsed.get("raw", {}).get("status.FocusValue"), "zoom")
         return _Status(pan_deg=pan, tilt_deg=tilt, zoom_norm=zoom, focus_pos=focus)
 
     def _run(self) -> None:
-        if self._csv_path:
-            try:
-                self._csv_file = open(self._csv_path, "w", newline="", encoding="utf-8")
-                self._csv_writer = csv.writer(self._csv_file)
-                self._csv_writer.writerow(["ts", "pan_deg", "tilt_deg", "zoom_norm", "focus_pos"])
-            except Exception:
-                self._csv_file = None
-                self._csv_writer = None
         while not self._stop.is_set():
             txt = self._fetch_text()
             if txt:
                 if not self._has_data:
                     print(f"PTZ CGI data available: {txt.strip()}")
                     self._has_data = True
-                st = self._parse(txt)
-                self._status = st
-                self._last.pan_deg = st.pan_deg
-                self._last.tilt_deg = st.tilt_deg
-                self._last.zoom_norm = st.zoom_norm
-                self._last.focus_pos = st.focus_pos
-                row = {
-                    "ts": time.time(),
-                    "pan_deg": getattr(st, "pan_deg", None),
-                    "tilt_deg": getattr(st, "tilt_deg", None),
-                    "zoom_norm": getattr(st, "zoom_norm", None),
-                    "focus_pos": getattr(st, "focus_pos", None),
-                }
-                try:
-                    import shared_state
-                    shared_state.update_ptz_meta({
-                        "ts": row["ts"],
-                        "pan_deg": row["pan_deg"],
-                        "tilt_deg": row["tilt_deg"],
-                        "zoom_mm": None,
-                        "zoom_norm": row["zoom_norm"],
-                        "pan_dps": None,
-                        "tilt_dps": None,
-                        "zoom_speed": None,
-                        "hfov_deg": None,
-                        "focus_pos": row["focus_pos"],
-                        "cgi_last": {
-                            "pan_deg": row["pan_deg"],
-                            "tilt_deg": row["tilt_deg"],
-                            "zoom": row["zoom_norm"],
-                        },
-                    })
-                except Exception:
-                    pass
-                if self._csv_writer:
+                parsed = parse_cgi_status(txt)
+                err = None
+                if parsed.get("pan") is None or parsed.get("tilt") is None:
+                    err = "missing pan/tilt (key mismatch?)"
+                log_ptz_row(
+                    source="CGI",
+                    url=self._urls[self._url_index],
+                    http_code=200,
+                    channel=self.channel,
+                    auth="Basic",
+                    body=txt,
+                    parsed=parsed,
+                    err=err,
+                )
+                if not err:
+                    st = _Status(
+                        pan_deg=self._to_deg(parsed.get("pan"), "pan"),
+                        tilt_deg=self._to_deg(parsed.get("tilt"), "tilt"),
+                        zoom_norm=self._normalize_zoom(
+                            self._to_deg(parsed.get("zoom"), "zoom")
+                        ),
+                        focus_pos=self._to_deg(parsed.get("focus"), "zoom"),
+                    )
+                    self._status = st
+                    self._last.pan_deg = st.pan_deg
+                    self._last.tilt_deg = st.tilt_deg
+                    self._last.zoom_norm = st.zoom_norm
+                    self._last.focus_pos = st.focus_pos
+                    row = {
+                        "ts": time.time(),
+                        "pan_deg": getattr(st, "pan_deg", None),
+                        "tilt_deg": getattr(st, "tilt_deg", None),
+                        "zoom_norm": getattr(st, "zoom_norm", None),
+                        "focus_pos": getattr(st, "focus_pos", None),
+                    }
                     try:
-                        self._csv_writer.writerow([
-                            row["ts"],
-                            row["pan_deg"],
-                            row["tilt_deg"],
-                            row["zoom_norm"],
-                            row["focus_pos"],
-                        ])
-                        self._csv_file.flush()
+                        import shared_state
+
+                        shared_state.update_ptz_meta(
+                            {
+                                "ts": row["ts"],
+                                "pan_deg": row["pan_deg"],
+                                "tilt_deg": row["tilt_deg"],
+                                "zoom_mm": None,
+                                "zoom_norm": row["zoom_norm"],
+                                "pan_dps": None,
+                                "tilt_dps": None,
+                                "zoom_speed": None,
+                                "hfov_deg": None,
+                                "focus_pos": row["focus_pos"],
+                                "cgi_last": {
+                                    "pan_deg": row["pan_deg"],
+                                    "tilt_deg": row["tilt_deg"],
+                                    "zoom": row["zoom_norm"],
+                                },
+                            }
+                        )
                     except Exception:
                         pass
             else:
+                log_ptz_row(
+                    source="CGI",
+                    url=self._urls[self._url_index],
+                    http_code=-1,
+                    channel=self.channel,
+                    auth="Basic",
+                    body="",
+                    parsed={},
+                    err="no response",
+                )
                 if self._has_data:
                     print("PTZ CGI data unavailable")
                     self._has_data = False

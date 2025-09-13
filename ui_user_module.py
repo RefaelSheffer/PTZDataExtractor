@@ -203,6 +203,38 @@ class UserTab(QtWidgets.QWidget):
         self.lbl_calib.setText("Calibration: " + ", ".join(parts) if parts else "Calibration: N/A")
 
     # ------------------------------------------------------------------
+    def _grab_snapshot_pixmap(self, vw: VlcVideoWidget) -> QtGui.QPixmap | None:
+        """Take a snapshot of the current video frame via VLC.
+
+        Directly grabbing the widget contents returns a black frame on
+        platforms where VLC renders to a native window.  Using VLC's
+        ``video_take_snapshot`` API and reloading the temporary file is a
+        more reliable cross-platform method.
+        """
+        try:
+            player = vw.player()
+            if not player or not player.is_playing():
+                return None
+            from pathlib import Path
+            import tempfile, time
+            tmp = Path(tempfile.gettempdir()) / f"user_snap_{int(time.time()*1000)}.png"
+            try:
+                player.video_take_snapshot(0, str(tmp), 0, 0)
+            except Exception:
+                return None
+            for _ in range(6):
+                if tmp.exists() and tmp.stat().st_size > 0:
+                    pm = QtGui.QPixmap(str(tmp))
+                    try:
+                        tmp.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    return pm if not pm.isNull() else None
+                QtCore.QThread.msleep(120)
+        except Exception:
+            pass
+        return None
+
     # Actions - mostly placeholders for now
     def on_pick_now(self) -> None:
         lay = self.video_container.layout()
@@ -213,7 +245,10 @@ class UserTab(QtWidgets.QWidget):
         if not vw:
             self._toast("No video widget", error=True)
             return
-        pm = vw.grab()
+        pm = self._grab_snapshot_pixmap(vw)
+        if pm is None or pm.isNull():
+            self._toast("Snapshot failed", error=True)
+            return
         img = pm.toImage()
         dlg = SinglePickDialog(img, self)
         if dlg.exec() != QtWidgets.QDialog.Accepted or dlg.picked_uv() is None:

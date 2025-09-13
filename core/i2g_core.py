@@ -155,7 +155,10 @@ def intersect_ray_with_dem(
     while t <= max_range_m:
         p = o + d * t
         elev = dem.elevation(float(p[0]), float(p[1]))
-        if elev is not None and p[2] <= elev:
+        if elev is None or not math.isfinite(elev):
+            t += step_m
+            continue
+        if p[2] <= elev:
             return float(p[0]), float(p[1]), float(elev)
         t += step_m
     return None

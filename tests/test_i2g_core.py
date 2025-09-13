@@ -76,3 +76,23 @@ def test_intersect_sloped_dem():
     assert hit is not None
     x, y, z = hit
     assert pytest.approx(z, abs=1e-3) == pytest.approx(0.5 * x, abs=1e-3)
+
+
+def test_intersect_dem_ignores_non_finite():
+    intr = Intrinsics.from_hfov(400, 300, 90.0)
+    extr = Extrinsics(0.0, 0.0, 10.0, -90.0, 45.0, 0.0, 4326)
+    ptz = PTZ(0.0, 0.0, None)
+    origin, direction = image_ray(200, 150, intr, ptz, extr)
+
+    class HoleDem:
+        def elevation(self, x: float, y: float) -> float:
+            if x > -5:
+                return float("inf")
+            return 0.0
+
+    dem = HoleDem()
+    hit = intersect_ray_with_dem(origin, direction, dem, max_range_m=100.0, step_m=1.0)
+    assert hit is not None
+    x, y, z = hit
+    assert pytest.approx(z, abs=1e-3) == 0.0
+    assert pytest.approx(x, abs=0.7) == -10.0

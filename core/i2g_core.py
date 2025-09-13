@@ -161,16 +161,16 @@ def intersect_ray_with_dem(
     dem: DemSampler,
     max_range_m: float = 5000.0,
     step_m: float = 20.0,
-    refine_steps: int = 8,
-    tol_m: float = 0.5,
+    refine_steps: int = 20,
 ) -> Optional[Tuple[float, float, float]]:
     """Intersect a ray with a DEM using adaptive stepping.
 
     The ray is first marched forward in coarse ``step_m`` increments until
-    a sample falls below the DEM surface.  Once a crossing is detected the
-    segment is refined using a binary search for ``refine_steps`` iterations
-    (or until the vertical error is below ``tol_m``).  The refined
-    intersection point is returned.
+    a segment of the ray crosses the DEM surface.  The bracketed segment is
+    then refined with a short binary search of ``refine_steps`` iterations to
+    converge on a stable intersection point.  This approach mirrors the
+    implementation used in :func:`geom3d.intersect_ray_with_dtm` and provides
+    higher accuracy without a large performance cost.
     """
 
     o = np.asarray(ray_origin, dtype=float)
@@ -180,33 +180,44 @@ def intersect_ray_with_dem(
     step = step_m / meters_per_unit
     max_range = max_range_m / meters_per_unit
 
-    t = 0.0
+    t_prev = 0.0
+    p_prev = o + d * t_prev
+    elev_prev = dem.elevation(float(p_prev[0]), float(p_prev[1]))
+    if elev_prev is None or not math.isfinite(elev_prev):
+        elev_prev = -1e9
+
+    t = step
     while t <= max_range:
         p = o + d * t
         elev = dem.elevation(float(p[0]), float(p[1]))
         if elev is None or not math.isfinite(elev):
             t += step
             continue
-        if p[2] <= elev:
-            t_low, t_high = max(0.0, t - step), t
+
+        prev_val = p_prev[2] - elev_prev
+        curr_val = p[2] - elev
+        if prev_val * curr_val <= 0:
+            lo, hi = t_prev, t
+            val_lo = prev_val
             for _ in range(refine_steps):
-                t_mid = 0.5 * (t_low + t_high)
-                p_mid = o + d * t_mid
+                mid = 0.5 * (lo + hi)
+                p_mid = o + d * mid
                 elev_mid = dem.elevation(float(p_mid[0]), float(p_mid[1]))
                 if elev_mid is None or not math.isfinite(elev_mid):
-                    t_low = t_mid
+                    lo = mid
                     continue
-                if p_mid[2] <= elev_mid:
-                    t_high = t_mid
+                val_mid = p_mid[2] - elev_mid
+                if val_lo * val_mid <= 0:
+                    hi = mid
                 else:
-                    t_low = t_mid
-                if abs(p_mid[2] - elev_mid) < tol_m:
-                    p = p_mid
-                    elev = elev_mid
-                    break
-            else:
-                p = o + d * t_high
-                elev = dem.elevation(float(p[0]), float(p[1]))
-            return float(p[0]), float(p[1]), float(elev)
+                    lo, val_lo = mid, val_mid
+            p_hit = o + d * hi
+            elev_hit = dem.elevation(float(p_hit[0]), float(p_hit[1]))
+            if elev_hit is None or not math.isfinite(elev_hit):
+                elev_hit = p_hit[2]
+            return float(p_hit[0]), float(p_hit[1]), float(elev_hit)
+
+        t_prev, p_prev, elev_prev = t, p, elev
         t += step
+
     return None

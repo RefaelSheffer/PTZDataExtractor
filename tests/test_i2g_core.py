@@ -65,9 +65,9 @@ def test_intersect_flat_dem():
     hit = intersect_ray_with_dem(origin, direction, dem, max_range_m=100.0, step_m=20.0)
     assert hit is not None
     x, y, z = hit
-    assert pytest.approx(z, abs=1e-3) == 0.0
-    assert pytest.approx(x, abs=0.7) == -10.0
-    assert pytest.approx(y, abs=0.2) == 0.0
+    assert pytest.approx(z, abs=1e-6) == 0.0
+    assert pytest.approx(x, abs=1e-3) == -10.0
+    assert pytest.approx(y, abs=1e-3) == 0.0
 
 
 def test_intersect_sloped_dem():
@@ -103,8 +103,8 @@ def test_intersect_dem_ignores_non_finite():
     hit = intersect_ray_with_dem(origin, direction, dem, max_range_m=100.0, step_m=20.0)
     assert hit is not None
     x, y, z = hit
-    assert pytest.approx(z, abs=1e-3) == 0.0
-    assert pytest.approx(x, abs=0.7) == -10.0
+    assert pytest.approx(z, abs=1e-6) == 0.0
+    assert pytest.approx(x, abs=1e-3) == -10.0
 
 
 def test_intersect_dem_respects_meters_per_unit():

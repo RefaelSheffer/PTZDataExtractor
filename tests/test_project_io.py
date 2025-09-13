@@ -29,7 +29,8 @@ def test_export_and_load_project(tmp_path, monkeypatch):
         "roll_offset_deg": 2.2,
         "pitch_offset_deg": 3.3,
     }
-    export_project(project_path, profile, "b1", str(dtm), str(ortho))
+    cam_pos = {"x": 10.0, "y": 20.0, "epsg": 4326}
+    export_project(project_path, profile, "b1", str(dtm), str(ortho), camera_position=cam_pos)
 
     data = load_project(project_path)
     assert data["camera"]["name"] == "cam1"
@@ -39,3 +40,4 @@ def test_export_and_load_project(tmp_path, monkeypatch):
     assert data["bundle"]["name"] == "b1"
     assert Path(data["layers"]["dtm"]) == dtm
     assert Path(data["bundle"]["terrain_path"]).name == "mesh.obj"
+    assert data["camera_position"] == cam_pos

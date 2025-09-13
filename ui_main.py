@@ -136,8 +136,10 @@ class MainWindow(QtWidgets.QMainWindow):
         bundle_name = self.prep_module.current_bundle_name()
         dtm_path = shared_state.dtm_path or self.prep_module.get_dtm_path()
         ortho_path = shared_state.orthophoto_path or ""
+        cam_pos = getattr(shared_state, "camera_proj", None)
         try:
-            export_project(Path(path), profile, bundle_name, dtm_path, ortho_path)
+            export_project(Path(path), profile, bundle_name, dtm_path, ortho_path,
+                           camera_position=cam_pos)
             self.log(f"Project saved -> {path}")
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Save Project", f"Failed: {e}")
@@ -163,12 +165,31 @@ class MainWindow(QtWidgets.QMainWindow):
             proj.offset_for_camera = {alias: offsets}
         app_state.project = proj
 
+        cam_pos = data.get("camera_position")
+        if cam_pos:
+            shared_state.camera_proj = cam_pos
+
         self.cam_module.apply_profile(data.get("camera", {}))
         bundle = data.get("bundle")
         if bundle:
             self.prep_module.apply_bundle(bundle)
         layers = data.get("layers", {})
         self.prep_module.apply_project_layers(layers.get("dtm"), layers.get("ortho"))
+        if cam_pos:
+            try:
+                layer = getattr(self.prep_module, "_ortho_layer", None)
+                if layer is not None:
+                    epsg_here = layer.ds.crs.to_epsg()
+                    X, Y = float(cam_pos.get("x", 0.0)), float(cam_pos.get("y", 0.0))
+                    epsg_cam = cam_pos.get("epsg")
+                    if epsg_here and epsg_cam and epsg_cam != epsg_here:
+                        from pyproj import Transformer
+                        tr = Transformer.from_crs(f"EPSG:{epsg_cam}", f"EPSG:{epsg_here}", always_xy=True)
+                        X, Y = tr.transform(X, Y)
+                    xs, ys = layer.geo_to_scene(X, Y)
+                    self.prep_module.map.set_marker(xs, ys)
+            except Exception:
+                pass
         self.log(f"Project loaded -> {path}")
 
     # ------- global logging -------

@@ -69,7 +69,8 @@ def _expand_path(s: str, base: Path) -> str:
 def export_project(out_path: Path, profile: Dict[str, Any] | str, bundle_name: str,
                    dtm_path: str, ortho_path: str, *,
                    profiles_path: Path = PROFILES_PATH,
-                   srs: str = "EPSG:4326", project_name: str | None = None) -> Path:
+                   srs: str = "EPSG:4326", project_name: str | None = None,
+                   camera_position: Dict[str, Any] | None = None) -> Path:
     """Create a .rtgproj file that unifies profile, bundle and layers.
 
     Parameters
@@ -90,6 +91,9 @@ def export_project(out_path: Path, profile: Dict[str, Any] | str, bundle_name: s
         Spatial reference system code for the layers.
     project_name : str, optional
         Human friendly name for the project. Defaults to the profile's name.
+    camera_position : dict, optional
+        Optional camera XY position on the map. Structure:
+        ``{"x": float, "y": float, "epsg": int|None}``.
     """
     out_path = Path(out_path)
     base = out_path.parent
@@ -124,6 +128,13 @@ def export_project(out_path: Path, profile: Dict[str, Any] | str, bundle_name: s
             "srs": srs,
         },
     }
+
+    if camera_position:
+        data["camera_position"] = {
+            "x": float(camera_position.get("x", 0.0)),
+            "y": float(camera_position.get("y", 0.0)),
+            "epsg": camera_position.get("epsg"),
+        }
 
     out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return out_path

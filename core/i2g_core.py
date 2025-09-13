@@ -137,14 +137,17 @@ def intersect_ray_with_dem(
     ray_dir: np.ndarray,
     dem: DemSampler,
     max_range_m: float = 5000.0,
-    step_m: float = 5.0,
+    step_m: float = 20.0,
+    refine_steps: int = 8,
+    tol_m: float = 0.5,
 ) -> Optional[Tuple[float, float, float]]:
-    """Intersect a ray with a DEM using a simple stepping search.
+    """Intersect a ray with a DEM using adaptive stepping.
 
-    The function marches along the ray in ``step_m`` increments until
-    either an intersection with the DEM is found or ``max_range_m`` is
-    exceeded.  The first point where the ray height drops below the DEM
-    height is returned.  No interpolation is performed.
+    The ray is first marched forward in coarse ``step_m`` increments until
+    a sample falls below the DEM surface.  Once a crossing is detected the
+    segment is refined using a binary search for ``refine_steps`` iterations
+    (or until the vertical error is below ``tol_m``).  The refined
+    intersection point is returned.
     """
 
     o = np.asarray(ray_origin, dtype=float)
@@ -159,6 +162,25 @@ def intersect_ray_with_dem(
             t += step_m
             continue
         if p[2] <= elev:
+            t_low, t_high = max(0.0, t - step_m), t
+            for _ in range(refine_steps):
+                t_mid = 0.5 * (t_low + t_high)
+                p_mid = o + d * t_mid
+                elev_mid = dem.elevation(float(p_mid[0]), float(p_mid[1]))
+                if elev_mid is None or not math.isfinite(elev_mid):
+                    t_low = t_mid
+                    continue
+                if p_mid[2] <= elev_mid:
+                    t_high = t_mid
+                else:
+                    t_low = t_mid
+                if abs(p_mid[2] - elev_mid) < tol_m:
+                    p = p_mid
+                    elev = elev_mid
+                    break
+            else:
+                p = o + d * t_high
+                elev = dem.elevation(float(p[0]), float(p[1]))
             return float(p[0]), float(p[1]), float(elev)
         t += step_m
     return None

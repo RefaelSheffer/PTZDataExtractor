@@ -76,8 +76,11 @@ class UserTab(QtWidgets.QWidget):
         bus.signal_camera_changed.connect(self._on_active_camera_changed)
         shared_state.signal_layers_changed.connect(self._on_layers_changed)
         shared_state.signal_camera_changed.connect(self._apply_current_layers)
+        # redraw camera marker if camera position updates
+        shared_state.signal_camera_changed.connect(lambda *_: self._draw_camera_marker())
         self.mount_video_preview()
         self._apply_current_layers()
+        self._draw_camera_marker()
         if app_state.current_camera:
             self._on_active_camera_changed(app_state.current_camera)
 
@@ -141,6 +144,7 @@ class UserTab(QtWidgets.QWidget):
                 sc.addPixmap(pix)
                 self.map.setScene(sc)
                 self.map.fit()
+                QtCore.QTimer.singleShot(50, self._draw_camera_marker)
                 if not self._az_item:
                     self.on_toggle_azimuth()
             if dtm:
@@ -181,6 +185,25 @@ class UserTab(QtWidgets.QWidget):
         dtm = self._resolve_path(layers.get("dtm"))
         ortho = self._resolve_path(layers.get("ortho"))
         self.on_load_layers(dtm, ortho)
+
+    def _draw_camera_marker(self) -> None:
+        if self._ortho_layer is None:
+            return
+        cam = getattr(shared_state, "camera_proj", None)
+        if not cam:
+            return
+        try:
+            epsg_here = self._ortho_layer.ds.crs.to_epsg()
+            X, Y = float(cam["x"]), float(cam["y"])
+            epsg_cam = cam.get("epsg")
+            if epsg_here and epsg_cam and epsg_cam != epsg_here:
+                from pyproj import Transformer
+                tr = Transformer.from_crs(f"EPSG:{epsg_cam}", f"EPSG:{epsg_here}", always_xy=True)
+                X, Y = tr.transform(X, Y)
+            xs, ys = self._ortho_layer.geo_to_scene(X, Y)
+            self.map.set_marker(xs, ys)
+        except Exception as e:  # pragma: no cover - UI feedback
+            self._log(f"draw_camera_marker failed: {e}")
 
     def _resolve_path(self, p: str | None) -> str | None:
         if not p:

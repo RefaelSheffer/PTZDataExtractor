@@ -260,10 +260,14 @@ class PrepModule(QtCore.QObject):
         self._update_layer_visibility()
 
     def _update_layer_visibility(self):
-        if self._dtm_pixmap is not None:
-            self._dtm_pixmap.setVisible(self.chk_show_dtm.isChecked())
-        if self._ortho_pixmap is not None:
-            self._ortho_pixmap.setVisible(self.chk_show_ortho.isChecked())
+        def _safe_visible(item, flag):
+            try:
+                if item is not None and item.scene() is not None:
+                    item.setVisible(flag)
+            except RuntimeError:
+                pass
+        _safe_visible(getattr(self, "_dtm_pixmap", None), self.chk_show_dtm.isChecked())
+        _safe_visible(getattr(self, "_ortho_pixmap", None), self.chk_show_ortho.isChecked())
 
     # קליק על המפה → קיבוע XY למצלמה (ושרטוט CAM)
     def _map_clicked(self, xs: float, ys: float):
@@ -414,6 +418,9 @@ class PrepModule(QtCore.QObject):
                 n_before = -1
             print(f"[Prep._load_orthophoto] before clear: items={n_before}")
             sc.clear()
+            # clear python references to deleted graphics items
+            self._dtm_pixmap = None
+            self._ortho_pixmap = None
             try:
                 n_after = len(sc.items())
             except Exception:

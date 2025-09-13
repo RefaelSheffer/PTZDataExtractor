@@ -120,7 +120,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         user = UserModule(self.vlc_instance, log_func=self.log)
         self._modules.append(user)
-        self.tabs.insertTab(0, _scroll(user.widget()), user.title)
+        # Avoid wrapping the operational tab in a QScrollArea. The embedded
+        # VLC video surface does not cooperate well with scroll containers and
+        # would repaint repeatedly when it became the only visible widget,
+        # leading to a distracting flicker. Inserting the widget directly keeps
+        # the view stable when other docks are hidden.
+        self.tabs.insertTab(0, user.widget(), user.title)
 
         # Connect shared status signals
         shared_state.signal_rtsp_state_changed.connect(self._on_rtsp_state)

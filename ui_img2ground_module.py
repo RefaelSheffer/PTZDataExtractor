@@ -11,27 +11,81 @@ viewing direction and field of view used during calibration.
 from __future__ import annotations
 import sys, math, json
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple, List, Protocol
+from typing import Optional, Dict, Any, Tuple, List, Protocol, TYPE_CHECKING
 
 import numpy as np
-from PySide6 import QtCore, QtWidgets, QtGui
-import vlc
+from pyproj import Transformer
+import types
+import sys
+try:  # pragma: no cover - optional Qt/vlc dependencies
+    from PySide6 import QtCore, QtWidgets, QtGui  # type: ignore
+    import vlc  # type: ignore
+except Exception:  # pragma: no cover
+    QtCore = types.SimpleNamespace(
+        QObject=object,
+        Signal=lambda *a, **k: None,
+        Slot=lambda *a, **k: (lambda f: f),
+        Qt=types.SimpleNamespace(
+            Horizontal=0,
+            LeftButton=0,
+            RightButton=0,
+            AlignCenter=0,
+            CrossCursor=0,
+        ),
+    )
+    QtWidgets = types.SimpleNamespace(
+        QGraphicsView=object,
+        QWidget=object,
+        QDialog=object,
+        QLabel=object,
+        QPushButton=object,
+        QGridLayout=object,
+        QComboBox=object,
+        QGraphicsScene=object,
+        QVBoxLayout=object,
+        QSplitter=object,
+        QSizePolicy=types.SimpleNamespace(Expanding=0),
+        QMessageBox=object,
+        QGraphicsItem=object,
+    )
+    QtGui = types.SimpleNamespace(
+        QPixmap=object,
+        QPen=object,
+        QColor=object,
+        QImage=object,
+        QPalette=types.SimpleNamespace(Base=None),
+        QPainter=types.SimpleNamespace(Antialiasing=0, SmoothPixmapTransform=0),
+    )
+    vlc = types.SimpleNamespace()
+    sys.modules.setdefault("PySide6", types.SimpleNamespace(QtCore=QtCore, QtWidgets=QtWidgets, QtGui=QtGui))
+    sys.modules.setdefault("PySide6.QtCore", QtCore)
+    sys.modules.setdefault("PySide6.QtWidgets", QtWidgets)
+    sys.modules.setdefault("PySide6.QtGui", QtGui)
 
 from camera_models import load_bundle, list_bundles, CALIB_DIR
-from geom3d import camera_ray_in_world, GeoRef
+from geom3d import GeoRef
+from core.i2g_core import (
+    Intrinsics,
+    Extrinsics,
+    PTZ as CorePTZ,
+    image_ray,
+    intersect_ray_with_dem,
+)
 from dtm import DTM
-from map_view import MapView
-from ui_map_tools import numpy_to_qimage
-from raster_layer import RasterLayer
-from ui_common import VlcVideoWidget
-from ui_calibration_module import HorizonAzimuthCalibrationDialog
-import shared_state
-from app_state import app_state
-from event_bus import bus
 
-from any_ptz_client import AnyPTZClient
+if TYPE_CHECKING:  # pragma: no cover - type hints only
+    from map_view import MapView
+from raster_layer import RasterLayer
+from app_state import app_state
 from onvif_ptz import PTZReading
-from calibration_utils import roll_error_from_horizon
+
+# Lazily imported UI-heavy modules
+shared_state = None  # type: ignore
+bus = None  # type: ignore
+AnyPTZClient = None  # type: ignore
+VlcVideoWidget = None  # type: ignore
+HorizonAzimuthCalibrationDialog = None  # type: ignore
+roll_error_from_horizon = None  # type: ignore
 
 APP_DIR = Path(__file__).resolve().parent
 APP_CFG = APP_DIR / "app_config.json"
@@ -380,6 +434,26 @@ class Img2GroundModule(QtCore.QObject):
 
     def __init__(self, vlc_instance: vlc.Instance, log_func=print):
         super().__init__()
+        global shared_state, bus, AnyPTZClient, VlcVideoWidget, HorizonAzimuthCalibrationDialog, roll_error_from_horizon
+        if shared_state is None:
+            import shared_state as _shared_state
+            shared_state = _shared_state
+        if bus is None:
+            from event_bus import bus as _bus
+            bus = _bus
+        if AnyPTZClient is None:
+            from any_ptz_client import AnyPTZClient as _AnyPTZClient
+            AnyPTZClient = _AnyPTZClient
+        if VlcVideoWidget is None:
+            from ui_common import VlcVideoWidget as _VlcVideoWidget
+            VlcVideoWidget = _VlcVideoWidget
+        if HorizonAzimuthCalibrationDialog is None:
+            from ui_calibration_module import HorizonAzimuthCalibrationDialog as _HorizonAzimuthCalibrationDialog
+            HorizonAzimuthCalibrationDialog = _HorizonAzimuthCalibrationDialog
+        if roll_error_from_horizon is None:
+            from calibration_utils import roll_error_from_horizon as _roll_error_from_horizon
+            roll_error_from_horizon = _roll_error_from_horizon
+
         self._log = log_func
         self._vlc = vlc_instance
         self._cfg = load_cfg()
@@ -536,6 +610,7 @@ class Img2GroundModule(QtCore.QObject):
         # splitter
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal); splitter.setChildrenCollapsible(False); splitter.setHandleWidth(8)
         self.video.setMinimumHeight(360); splitter.addWidget(self.video)
+        from map_view import MapView  # local import to avoid heavy dependency at module import
         self._map = MapView(); self._map.setMinimumHeight(360); splitter.addWidget(self._map)
         self._map.clicked.connect(self._on_map_click)
         splitter.setStretchFactor(0,1); splitter.setStretchFactor(1,1)
@@ -895,6 +970,7 @@ class Img2GroundModule(QtCore.QObject):
 
     def apply_ortho(self, layer: RasterLayer) -> None:
         try:
+            from ui_map_tools import numpy_to_qimage  # local import
             self._ortho_layer = layer
             img = numpy_to_qimage(layer.downsampled_image())
             pix = QtGui.QPixmap.fromImage(img)
@@ -1428,10 +1504,14 @@ class Img2GroundModule(QtCore.QObject):
         pose_d = self._bundle.get("pose") if self._bundle else None
         georef = GeoRef.from_dict(self._bundle["georef"]) if self._bundle else None
         if pose_d and georef:
-            o = np.array([pose_d.get("x", 0.0), pose_d.get("y", 0.0), pose_d.get("z", 0.0)])
-            yaw_rad = math.radians(yaw_avg)
-            d = np.array([math.sin(yaw_rad), math.cos(yaw_rad), 0.0])
-            self._draw_azimuth_line(o, d, georef)
+            o_local = np.array([pose_d.get("x", 0.0), pose_d.get("y", 0.0), pose_d.get("z", 0.0)])
+            g0 = georef.local_to_geographic(o_local)
+            prj0 = g0.get("projected")
+            if prj0:
+                o = np.array([prj0["x"], prj0["y"], g0["lla"]["alt"]])
+                yaw_rad = math.radians(yaw_avg)
+                d = np.array([math.sin(yaw_rad), math.cos(yaw_rad), 0.0])
+                self._draw_azimuth_line(o, d)
         self._refresh_readiness()
         self._refresh_az_btn_state()
 
@@ -1469,7 +1549,7 @@ class Img2GroundModule(QtCore.QObject):
             except Exception: pass
             self._azimuth_item = None
 
-    def _draw_azimuth_line(self, o: np.ndarray, d: np.ndarray, georef: GeoRef, length: float = 200.0):
+    def _draw_azimuth_line(self, o: np.ndarray, d: np.ndarray, length: float = 200.0):
         self._remove_azimuth_line()
         if self._ortho_layer is None:
             return
@@ -1481,16 +1561,12 @@ class Img2GroundModule(QtCore.QObject):
         start = o
         end = o + np.array([dir_xy[0]*length, dir_xy[1]*length, 0.0])
         try:
-            g1 = georef.local_to_geographic(start)
-            g2 = georef.local_to_geographic(end)
-            prj1, prj2 = g1.get("projected"), g2.get("projected")
-            if prj1 and prj2:
-                xs1, ys1 = self._ortho_layer.geo_to_scene(prj1["x"], prj1["y"])
-                xs2, ys2 = self._ortho_layer.geo_to_scene(prj2["x"], prj2["y"])
-                sc = self._ensure_scene()
-                pen = QtGui.QPen(QtGui.QColor(255, 0, 0), 2); pen.setCosmetic(True)
-                self._azimuth_item = sc.addLine(xs1, ys1, xs2, ys2, pen)
-                self._azimuth_item.setZValue(25)
+            xs1, ys1 = self._ortho_layer.geo_to_scene(start[0], start[1])
+            xs2, ys2 = self._ortho_layer.geo_to_scene(end[0], end[1])
+            sc = self._ensure_scene()
+            pen = QtGui.QPen(QtGui.QColor(255, 0, 0), 2); pen.setCosmetic(True)
+            self._azimuth_item = sc.addLine(xs1, ys1, xs2, ys2, pen)
+            self._azimuth_item.setZValue(25)
         except Exception:
             pass
 
@@ -1673,45 +1749,64 @@ class Img2GroundModule(QtCore.QObject):
         intr_d = self._bundle["intrinsics"]
         W = intr_d["width"]; H = intr_d["height"]
         if self._hfov_deg is not None:
-            fx = (W/2.0) / math.tan(math.radians(self._hfov_deg/2.0))
-            fy = fx; cx = W/2.0; cy = H/2.0
+            hfov = float(self._hfov_deg)
         else:
-            fx = intr_d["fx"]; fy = intr_d["fy"]; cx = intr_d["cx"]; cy = intr_d["cy"]
+            fx = intr_d["fx"]
+            hfov = math.degrees(2.0 * math.atan(W / (2.0 * fx)))
+        intr = Intrinsics(W, H, hfov)
+
         pose_d = self._bundle["pose"]
-        yaw = (self._ptz_last.pan_deg or 0.0) + (self._yaw_offset_deg or 0.0)
         pitch = pose_d.get("pitch_deg", pose_d.get("pitch", 0.0))
-        roll  = pose_d.get("roll_deg",  pose_d.get("roll", 0.0))
-        from geom3d import CameraIntrinsics, CameraPose, intersect_ray_with_dtm
-        intr = CameraIntrinsics(W, H, fx, fy, cx, cy)
-        pose = CameraPose(pose_d["x"], pose_d["y"], pose_d["z"], yaw, pitch, roll)
-        o, d = camera_ray_in_world(u, v, intr, pose)
+        roll = pose_d.get("roll_deg", pose_d.get("roll", 0.0))
+
         georef = GeoRef.from_dict(self._bundle["georef"])
+        cam_local = np.array([pose_d["x"], pose_d["y"], pose_d["z"]], dtype=float)
+        cam_geo = georef.local_to_geographic(cam_local)
+        prj = cam_geo.get("projected")
+        if not prj:
+            self.lbl_status.setText("Project georef missing EPSG.")
+            return False
+        extr = Extrinsics(
+            prj["x"],
+            prj["y"],
+            cam_geo["lla"]["alt"],
+            self._yaw_offset_deg or 0.0,
+            pitch,
+            roll,
+            prj["epsg"],
+        )
+
+        ptz = CorePTZ(self._ptz_last.pan_deg, self._ptz_last.tilt_deg, None)
+
+        o, d = image_ray(u, v, intr, ptz, extr)
 
         # always draw azimuth line
-        self._draw_azimuth_line(o, d, georef)
+        self._draw_azimuth_line(o, d)
 
         if self._dtm is None:
             self._remove_last_pick()
             self.lbl_status.setText("No DTM: showing azimuth only.")
             return True
 
-        p = intersect_ray_with_dtm(o, d, self._dtm, georef)
+        class _DtmSampler:
+            def __init__(self, dtm):
+                self._dtm = dtm
+            def elevation(self, x: float, y: float):
+                return self._dtm.sample(x, y)
+
+        dem = _DtmSampler(self._dtm)
+        p = intersect_ray_with_dem(o, d, dem)
         if p is None:
             self._remove_last_pick()
-            self.lbl_status.setText("Missed DTM / No intersection."); return True
-        g = georef.local_to_geographic(p)
-        lla = g["lla"]; prj = g["projected"]
+            self.lbl_status.setText("Missed DTM / No intersection.")
+            return True
+        x, y, z = p
         try:
-            epsg = self._ortho_layer.ds.crs.to_epsg()
-            if prj and prj.get("epsg") == epsg:
-                X, Y = prj["x"], prj["y"]
-            else:
-                from pyproj import Transformer
-                tr = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
-                X, Y = tr.transform(lla["lon"], lla["lat"])
-            xs, ys = self._ortho_layer.geo_to_scene(X, Y)
-            self._show_pick_on_map(xs, ys, text=f"{lla['lat']:.5f},{lla['lon']:.5f}")
-            self.lbl_status.setText(f"PTZ: lat={lla['lat']:.7f}, lon={lla['lon']:.7f}, alt={lla['alt']:.2f}")
+            xs, ys = self._ortho_layer.geo_to_scene(x, y)
+            tr = Transformer.from_crs(f"EPSG:{extr.epsg}", "EPSG:4326", always_xy=True)
+            lon, lat = tr.transform(x, y)
+            self._show_pick_on_map(xs, ys, text=f"{lat:.5f},{lon:.5f}")
+            self.lbl_status.setText(f"PTZ: lat={lat:.7f}, lon={lon:.7f}, alt={z:.2f}")
         except Exception:
             pass
         return True

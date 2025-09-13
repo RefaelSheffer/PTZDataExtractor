@@ -139,3 +139,44 @@ def test_image_ray_uses_principal_point():
     # With an off-center principal point the ray should no longer point straight ahead
     assert dir_center[0] == pytest.approx(0.0, abs=1e-6)
     assert dir_off[0] > 0.0
+
+
+def test_image_ray_tilt_90_points_up():
+    """Tilting the camera 90° up should yield a +Z ray."""
+
+    intr = Intrinsics.from_hfov(400, 300, 90.0)
+    extr = Extrinsics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4326)
+    _, direction = image_ray(
+        int(intr.cx), int(intr.cy), intr, PTZ(0.0, 90.0, None), extr
+    )
+    assert np.allclose(direction, [0.0, 0.0, 1.0])
+
+
+def test_intersect_flat_dem_returns_elevation():
+    """Flat DEM at constant height should return that height."""
+
+    intr = Intrinsics.from_hfov(400, 300, 90.0)
+    extr = Extrinsics(0.0, 0.0, 10.0, 0.0, 90.0, 0.0, 4326)
+    origin, direction = image_ray(
+        int(intr.cx), int(intr.cy), intr, PTZ(0.0, 0.0, None), extr
+    )
+    dem = FlatDem(2.0)
+    hit = intersect_ray_with_dem(origin, direction, dem, max_range_m=50.0, step_m=5.0)
+    assert hit is not None
+    x, y, z = hit
+    assert pytest.approx(x, abs=1e-6) == 0.0
+    assert pytest.approx(y, abs=1e-6) == 0.0
+    assert pytest.approx(z, abs=1e-6) == dem.elev
+
+
+def test_epsg_round_trip_precision():
+    """Converting coordinates between EPSGs should preserve location."""
+
+    pyproj = pytest.importorskip("pyproj")
+    tr_fwd = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+    tr_rev = pyproj.Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+    lon, lat = 34.8, 31.7
+    X, Y = tr_fwd.transform(lon, lat)
+    lon2, lat2 = tr_rev.transform(X, Y)
+    assert lon2 == pytest.approx(lon, abs=1e-9)
+    assert lat2 == pytest.approx(lat, abs=1e-9)

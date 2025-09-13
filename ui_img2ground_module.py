@@ -516,7 +516,9 @@ class Img2GroundModule(QtCore.QObject):
         shared_state.signal_layers_changed.connect(self._on_layers_changed)
         shared_state.signal_layers_changed.connect(lambda *_: self._apply_layers_from_shared())
         bus.signal_camera_changed.connect(lambda ctx: self._apply_layers_from_shared())
-        bus.signal_ortho_changed.connect(self._on_ortho_changed)
+        bus.signal_ortho_changed.connect(
+            lambda alias, layer: (self.apply_ortho(layer), self._refresh_readiness())
+        )
         if app_state.current_camera:
             self.use_active_camera(force=True)
         self._on_stream_mode_changed(getattr(app_state, "stream_mode", "online"))
@@ -994,11 +996,6 @@ class Img2GroundModule(QtCore.QObject):
             print(
                 f"[I2G.ortho] pixmap loaded? {not pix.isNull()} scene_has_items={len(self._map.scene().items())}"
             )
-            self._map.setSceneRect(self._ortho_pix.boundingRect())
-            try:
-                self._map.fit()
-            except Exception:
-                pass
             shared_state.orthophoto_path = layer.path
             self._log(f"Orthophoto loaded (EPSG={layer.ds.crs.to_epsg()})")
             self._remove_last_pick(); self._remove_video_frame_outline(); self._remove_fov_wedge()
@@ -1007,6 +1004,8 @@ class Img2GroundModule(QtCore.QObject):
             self._refresh_level_btn_state()
             print("[I2G.apply_ortho] scheduling draw_shared_camera_marker in 50ms")
             QtCore.QTimer.singleShot(50, self._draw_shared_camera_marker)
+            self._map.setSceneRect(self._ortho_pix.boundingRect())
+            self._map.fit()
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 
@@ -1042,10 +1041,6 @@ class Img2GroundModule(QtCore.QObject):
             self.apply_ortho(layer)
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
-
-    def _on_ortho_changed(self, alias: str, layer) -> None:
-        if alias == getattr(app_state.current_camera, "alias", None):
-            self.apply_ortho(layer)
 
     def _on_layers_changed(self, alias: str, layers: dict) -> None:
         if alias == getattr(app_state.current_camera, "alias", None):

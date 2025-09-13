@@ -417,7 +417,7 @@ class Img2GroundModule(QtCore.QObject):
 
         self._root = self._build_ui()
         self._attach_vlc_events()
-        QtCore.QTimer.singleShot(0, lambda: self._apply_layers_for(getattr(app_state.current_camera, 'alias', None)))
+        QtCore.QTimer.singleShot(0, self._apply_layers_from_shared)
         self.chk_use_active.blockSignals(True)
         self.chk_use_active.setChecked(True)
         self.chk_use_active.blockSignals(False)
@@ -434,11 +434,9 @@ class Img2GroundModule(QtCore.QObject):
         self._az_btn_timer.start()
         shared_state.signal_camera_changed.connect(self._on_active_camera_changed)
         shared_state.signal_stream_mode_changed.connect(self._on_stream_mode_changed)
-        shared_state.signal_camera_changed.connect(
-            lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None))
-        )
+        shared_state.signal_camera_changed.connect(lambda ctx: self._apply_layers_from_shared())
         shared_state.signal_layers_changed.connect(self._on_layers_changed)
-        bus.signal_camera_changed.connect(lambda ctx: self._apply_layers_for(getattr(ctx, "alias", None)))
+        bus.signal_camera_changed.connect(lambda ctx: self._apply_layers_from_shared())
         bus.signal_ortho_changed.connect(self._on_ortho_changed)
         if app_state.current_camera:
             self.use_active_camera(force=True)
@@ -559,14 +557,18 @@ class Img2GroundModule(QtCore.QObject):
         # readiness indicators
         ready_box = QtWidgets.QGroupBox("Calibration readiness")
         lr = QtWidgets.QVBoxLayout(ready_box)
-        self._lbl_ready_ortho = QtWidgets.QLabel()
-        self._lbl_ready_cam = QtWidgets.QLabel()
-        self._lbl_ready_pan = QtWidgets.QLabel()
-        self._lbl_ready_intr = QtWidgets.QLabel()
-        lr.addWidget(self._lbl_ready_ortho)
-        lr.addWidget(self._lbl_ready_cam)
-        lr.addWidget(self._lbl_ready_pan)
-        lr.addWidget(self._lbl_ready_intr)
+        self.chk_ortho = QtWidgets.QCheckBox("Ortho")
+        self.chk_ortho.setEnabled(False)
+        self.chk_camxy = QtWidgets.QCheckBox("Camera XY")
+        self.chk_camxy.setEnabled(False)
+        self.chk_ptz = QtWidgets.QCheckBox("PTZ pan")
+        self.chk_ptz.setEnabled(False)
+        self.chk_intr = QtWidgets.QCheckBox("Intrinsics")
+        self.chk_intr.setEnabled(False)
+        lr.addWidget(self.chk_ortho)
+        lr.addWidget(self.chk_camxy)
+        lr.addWidget(self.chk_ptz)
+        lr.addWidget(self.chk_intr)
         g.addWidget(ready_box, r, 0, 1, 8); r += 1
 
         # simple calibration group
@@ -922,9 +924,10 @@ class Img2GroundModule(QtCore.QObject):
 
     def _on_layers_changed(self, alias: str, layers: dict) -> None:
         if alias == getattr(app_state.current_camera, "alias", None):
-            self._apply_layers(layers)
+            self._apply_layers_from_shared()
 
-    def _apply_layers_for(self, alias: str | None) -> None:
+    def _apply_layers_from_shared(self) -> None:
+        alias = getattr(app_state.current_camera, "alias", None)
         if not alias:
             return
         layers = shared_state.layers_for_camera.get(alias)
@@ -932,24 +935,14 @@ class Img2GroundModule(QtCore.QObject):
             proj = getattr(app_state, "project", None)
             if proj is not None:
                 layers = getattr(proj, "layers_for_camera", {}).get(alias)
-        if layers:
-            self._apply_layers(layers)
-
-    def _apply_layers(self, layers: dict) -> None:
-        ortho = self._resolve_path(layers.get("ortho"))
+        if not layers:
+            return
         dtm = self._resolve_path(layers.get("dtm"))
+        ortho = self._resolve_path(layers.get("ortho"))
         if dtm:
-            try:
-                if self._dtm is not None:
-                    self._dtm.close()
-                self._dtm = DTM(dtm)
-                self._dtm_path = dtm
-            except Exception:
-                pass
+            self._load_dtm_path(dtm)
         if ortho:
-            self._load_orthophoto(ortho)
-            # Flag the presence of an orthophoto for readiness checks
-            self._ortho_layer = getattr(self._map, "ortho_layer", None) or True
+            self._load_orthophoto_path(ortho)
         try:
             self._map.fit()
         except Exception:
@@ -959,6 +952,23 @@ class Img2GroundModule(QtCore.QObject):
         QtCore.QTimer.singleShot(0, self._refresh_readiness)
         QtCore.QTimer.singleShot(0, self._refresh_az_btn_state)
         QtCore.QTimer.singleShot(0, self._refresh_level_btn_state)
+
+    def _load_dtm_path(self, path: str) -> None:
+        try:
+            if self._dtm is not None:
+                self._dtm.close()
+            self._dtm = DTM(path)
+            self._dtm_path = path
+        except Exception:
+            pass
+
+    def _load_orthophoto_path(self, path: str) -> None:
+        try:
+            self._load_orthophoto(path)
+            # Flag the presence of an orthophoto for readiness checks
+            self._ortho_layer = getattr(self._map, "ortho_layer", None) or True
+        except Exception:
+            pass
 
     def _open_prep_tab(self):
         QtWidgets.QMessageBox.information(None, "Preparation", "Load DTM/Orthophoto in the Preparation tab.")
@@ -1168,12 +1178,6 @@ class Img2GroundModule(QtCore.QObject):
         has_intr = bool(getattr(getattr(app_state, "current_camera", None), "intrinsics", None))
         return has_ortho, has_xy, has_pan, has_intr
 
-    def _set_ready_lbl(self, lbl: QtWidgets.QLabel, ok: bool, text: str) -> None:
-        icon = "\u2713" if ok else "\u2717"
-        color = "#0a0" if ok else "#a00"
-        lbl.setText(f"{icon} {text}")
-        lbl.setStyleSheet(f"color: {color};")
-
     def _refresh_readiness(self) -> None:
         if not getattr(self, "_dbg_readiness_printed", False):
             self._log(
@@ -1183,10 +1187,10 @@ class Img2GroundModule(QtCore.QObject):
             )
             self._dbg_readiness_printed = True
         has_ortho, has_xy, has_pan, has_intr = self._ready_flags()
-        self._set_ready_lbl(self._lbl_ready_ortho, has_ortho, "Ortho")
-        self._set_ready_lbl(self._lbl_ready_cam, has_xy, "Camera XY")
-        self._set_ready_lbl(self._lbl_ready_pan, has_pan, "PTZ pan")
-        self._set_ready_lbl(self._lbl_ready_intr, has_intr, "Intrinsics")
+        self.chk_ortho.setChecked(has_ortho)
+        self.chk_camxy.setChecked(has_xy)
+        self.chk_ptz.setChecked(has_pan)
+        self.chk_intr.setChecked(has_intr)
         all_ok = has_ortho and has_xy and has_pan and has_intr
         self.btn_fov_cal.setEnabled(all_ok)
 

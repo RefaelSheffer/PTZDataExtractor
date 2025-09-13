@@ -1778,6 +1778,16 @@ class Img2GroundModule(QtCore.QObject):
 
         o, d = image_ray(u, v, intr, ptz, extr)
 
+        # ensure origin uses orthophoto EPSG
+        try:
+            epsg_ortho = self._ortho_layer.ds.crs.to_epsg() if self._ortho_layer else None
+            if epsg_ortho and extr.epsg and epsg_ortho != extr.epsg:
+                tr = Transformer.from_crs(f"EPSG:{extr.epsg}", f"EPSG:{epsg_ortho}", always_xy=True)
+                ox, oy = tr.transform(o[0], o[1])
+                o = np.array([ox, oy, o[2]], dtype=float)
+        except Exception:
+            pass
+
         # always draw azimuth line
         self._draw_azimuth_line(o, d)
 

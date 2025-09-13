@@ -47,6 +47,15 @@ def test_image_ray_tilt_sign():
     assert down_dir[2] < 0.0
 
 
+def test_image_ray_missing_tilt_defaults_zero():
+    """If tilt telemetry is missing, it should default to zero."""
+    intr = Intrinsics.from_hfov(400, 300, 90.0)
+    extr = Extrinsics(0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 4326)
+    _, dir_none = image_ray(200, 150, intr, PTZ(0.0, None, None), extr)
+    _, dir_zero = image_ray(200, 150, intr, PTZ(0.0, 0.0, None), extr)
+    assert np.allclose(dir_none, dir_zero)
+
+
 def test_intersect_flat_dem():
     intr = Intrinsics.from_hfov(400, 300, 90.0)
     extr = Extrinsics(0.0, 0.0, 10.0, -90.0, 45.0, 0.0, 4326)

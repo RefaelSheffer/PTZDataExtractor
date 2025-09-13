@@ -13,7 +13,7 @@ class DummyPtzCgi(PtzCgiThread):
         super().__init__("localhost", 80, "u", "p", poll_hz=100.0)
 
     def _fetch_text(self):  # override network call
-        return "pan=1.0&tilt=2.0&zoom=0.25&focus=3.0"
+        return "pan=1.0&tilt=2.0&zoom=0.25&focus=3.0", 200
 
 
 def test_ptz_cgi_thread_shared_state():

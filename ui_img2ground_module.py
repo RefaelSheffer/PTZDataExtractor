@@ -931,6 +931,9 @@ class Img2GroundModule(QtCore.QObject):
         if not alias:
             return
         layers = shared_state.layers_for_camera.get(alias)
+        if not layers:
+            # fallback for layers loaded before camera selection
+            layers = shared_state.layers_for_camera.get("(default)")
         if layers is None:
             proj = getattr(app_state, "project", None)
             if proj is not None:
@@ -1191,7 +1194,7 @@ class Img2GroundModule(QtCore.QObject):
         self.chk_camxy.setChecked(has_xy)
         self.chk_ptz.setChecked(has_pan)
         self.chk_intr.setChecked(has_intr)
-        all_ok = has_ortho and has_xy and has_pan and has_intr
+        all_ok = has_ortho and has_xy and has_intr
         self.btn_fov_cal.setEnabled(all_ok)
 
     def _refresh_az_btn_state(self) -> None:

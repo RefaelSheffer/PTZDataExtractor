@@ -49,6 +49,7 @@ class UserTab(QtWidgets.QWidget):
         self.act_az = bar.addAction("Toggle Azimuth")
         self.cmb_mapping = QtWidgets.QComboBox()
         self.cmb_mapping.addItems(["Auto (prefer Homography)", "Homography only", "PTZ+DTM only"])
+        self.cmb_mapping.setCurrentIndex(2)
         bar.addWidget(self.cmb_mapping)
 
         # ----- video + map -----

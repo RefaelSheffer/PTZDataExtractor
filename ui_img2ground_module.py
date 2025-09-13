@@ -671,6 +671,7 @@ class Img2GroundModule(QtCore.QObject):
         rowp = QtWidgets.QHBoxLayout()
         self.cmb_mapping = QtWidgets.QComboBox()
         self.cmb_mapping.addItems(["Auto (prefer Homography)", "Homography only", "PTZ+DTM only"])
+        self.cmb_mapping.setCurrentIndex(2)
         self.btn_pick_now = QtWidgets.QPushButton("Pick now"); self.btn_pick_now.clicked.connect(self._pick_now_snapshot)
         self.btn_pick_now.setToolTip("לכידת פריים ותרגום לנ״צ/‏XY; נשלח גם ל-QR.")
         rowp.addWidget(QtWidgets.QLabel("Mapping mode:")); rowp.addWidget(self.cmb_mapping)

@@ -53,7 +53,7 @@ def test_intersect_flat_dem():
     ptz = PTZ(0.0, 0.0, None)
     origin, direction = image_ray(200, 150, intr, ptz, extr)
     dem = FlatDem(0.0)
-    hit = intersect_ray_with_dem(origin, direction, dem, max_range_m=100.0, step_m=1.0)
+    hit = intersect_ray_with_dem(origin, direction, dem, max_range_m=100.0, step_m=20.0)
     assert hit is not None
     x, y, z = hit
     assert pytest.approx(z, abs=1e-3) == 0.0
@@ -72,7 +72,7 @@ def test_intersect_sloped_dem():
             return 0.5 * x
 
     dem = SlopeDem()
-    hit = intersect_ray_with_dem(origin, direction, dem, max_range_m=200.0, step_m=1.0)
+    hit = intersect_ray_with_dem(origin, direction, dem, max_range_m=200.0, step_m=20.0)
     assert hit is not None
     x, y, z = hit
     assert pytest.approx(z, abs=1e-3) == pytest.approx(0.5 * x, abs=1e-3)
@@ -91,7 +91,7 @@ def test_intersect_dem_ignores_non_finite():
             return 0.0
 
     dem = HoleDem()
-    hit = intersect_ray_with_dem(origin, direction, dem, max_range_m=100.0, step_m=1.0)
+    hit = intersect_ray_with_dem(origin, direction, dem, max_range_m=100.0, step_m=20.0)
     assert hit is not None
     x, y, z = hit
     assert pytest.approx(z, abs=1e-3) == 0.0

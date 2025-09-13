@@ -422,10 +422,15 @@ class PrepModule(QtCore.QObject):
             except Exception:
                 n_before = -1
             print(f"[Prep._load_orthophoto] before clear: items={n_before}")
-            sc.clear()
-            # clear python references to deleted graphics items
+            dtm = self._dtm_pixmap
+            ortho = self._ortho_pixmap
             self._dtm_pixmap = None
             self._ortho_pixmap = None
+            try:
+                sc.clear()
+            finally:
+                dtm = None
+                ortho = None
             try:
                 n_after = len(sc.items())
             except Exception:

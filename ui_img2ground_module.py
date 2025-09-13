@@ -982,8 +982,12 @@ class Img2GroundModule(QtCore.QObject):
             except Exception:
                 n_before = -1
             print(f"[I2G.apply_ortho] before clear: items={n_before}")
-            sc.clear()
+            it = self._ortho_pix
             self._ortho_pix = None
+            try:
+                sc.clear()
+            finally:
+                it = None
             try:
                 n_after = len(sc.items())
             except Exception:

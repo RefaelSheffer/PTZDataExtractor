@@ -96,3 +96,21 @@ def test_intersect_dem_ignores_non_finite():
     x, y, z = hit
     assert pytest.approx(z, abs=1e-3) == 0.0
     assert pytest.approx(x, abs=0.7) == -10.0
+
+
+def test_intersect_dem_respects_meters_per_unit():
+    origin = np.array([0.0, 0.0, 1.0])
+    direction = np.array([1.0, 0.0, 0.0])
+
+    class PlateauDem:
+        meters_per_unit = 1000.0
+
+        def elevation(self, x: float, y: float) -> float:
+            return 2.0 if x >= 1.0 else -1.0
+
+    dem = PlateauDem()
+    hit = intersect_ray_with_dem(origin, direction, dem, max_range_m=1500.0, step_m=500.0)
+    assert hit is not None
+    x, y, z = hit
+    assert pytest.approx(x, abs=1e-6) == 1.0
+    assert pytest.approx(z, abs=1e-6) == 2.0

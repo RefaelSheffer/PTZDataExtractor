@@ -153,16 +153,19 @@ def intersect_ray_with_dem(
     o = np.asarray(ray_origin, dtype=float)
     d = np.asarray(ray_dir, dtype=float)
     d /= np.linalg.norm(d)
+    meters_per_unit = getattr(dem, "meters_per_unit", 1.0)
+    step = step_m / meters_per_unit
+    max_range = max_range_m / meters_per_unit
 
     t = 0.0
-    while t <= max_range_m:
+    while t <= max_range:
         p = o + d * t
         elev = dem.elevation(float(p[0]), float(p[1]))
         if elev is None or not math.isfinite(elev):
-            t += step_m
+            t += step
             continue
         if p[2] <= elev:
-            t_low, t_high = max(0.0, t - step_m), t
+            t_low, t_high = max(0.0, t - step), t
             for _ in range(refine_steps):
                 t_mid = 0.5 * (t_low + t_high)
                 p_mid = o + d * t_mid
@@ -182,5 +185,5 @@ def intersect_ray_with_dem(
                 p = o + d * t_high
                 elev = dem.elevation(float(p[0]), float(p[1]))
             return float(p[0]), float(p[1]), float(elev)
-        t += step_m
+        t += step
     return None

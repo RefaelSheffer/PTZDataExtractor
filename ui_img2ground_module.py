@@ -1799,6 +1799,7 @@ class Img2GroundModule(QtCore.QObject):
         class _DtmSampler:
             def __init__(self, dtm):
                 self._dtm = dtm
+                self.meters_per_unit = getattr(dtm, "meters_per_unit", 1.0)
             def elevation(self, x: float, y: float):
                 return self._dtm.sample(x, y)
 

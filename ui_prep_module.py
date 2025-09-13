@@ -398,6 +398,11 @@ class PrepModule(QtCore.QObject):
                 self._publish_layers(ortho=path)
                 alias = getattr(app_state.current_camera, "alias", None) or "(default)"
                 bus.signal_ortho_changed.emit(alias, layer)
+                epsg = layer.ds.crs.to_epsg()
+                print(f"[Prep] Orthophoto loaded: {path} (EPSG={epsg}) → emitting layers_changed")
+                shared_state.signal_layers_changed.emit("(default)", shared_state.layers_for_camera.get("(default)"))
+                if alias != "(default)":
+                    shared_state.signal_layers_changed.emit(alias, shared_state.layers_for_camera.get(alias))
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
 

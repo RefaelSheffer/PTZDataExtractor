@@ -24,12 +24,25 @@ def test_image_ray_center_forward():
     ptz = PTZ(0.0, 0.0, None)
     origin, direction = image_ray(200, 150, intr, ptz, extr)
     assert np.allclose(origin, [0.0, 0.0, 0.0])
-    assert np.allclose(direction, [0.0, 0.0, 1.0])
+    assert np.allclose(direction, [0.0, 1.0, 0.0])
+
+
+def test_image_ray_pan_and_tilt():
+    intr = Intrinsics.from_hfov(400, 300, 90.0)
+    extr = Extrinsics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4326)
+    # Yaw 90 degrees should point east (+X)
+    origin, direction = image_ray(200, 150, intr, PTZ(90.0, 0.0, None), extr)
+    assert np.allclose(direction, [1.0, 0.0, 0.0])
+    # Positive tilt raises the camera (Z>0)
+    _, up_dir = image_ray(200, 150, intr, PTZ(0.0, 10.0, None), extr)
+    _, down_dir = image_ray(200, 150, intr, PTZ(0.0, -10.0, None), extr)
+    assert up_dir[2] > 0
+    assert down_dir[2] < 0
 
 
 def test_intersect_flat_dem():
     intr = Intrinsics.from_hfov(400, 300, 90.0)
-    extr = Extrinsics(0.0, 0.0, 10.0, 0.0, -135.0, 0.0, 4326)
+    extr = Extrinsics(0.0, 0.0, 10.0, -90.0, 45.0, 0.0, 4326)
     ptz = PTZ(0.0, 0.0, None)
     origin, direction = image_ray(200, 150, intr, ptz, extr)
     dem = FlatDem(0.0)
@@ -37,13 +50,13 @@ def test_intersect_flat_dem():
     assert hit is not None
     x, y, z = hit
     assert pytest.approx(z, abs=1e-3) == 0.0
-    assert pytest.approx(x, abs=0.7) == -10.6
+    assert pytest.approx(x, abs=0.7) == -10.0
     assert pytest.approx(y, abs=0.2) == 0.0
 
 
 def test_intersect_sloped_dem():
     intr = Intrinsics.from_hfov(400, 300, 90.0)
-    extr = Extrinsics(0.0, 0.0, 10.0, 0.0, -135.0, 0.0, 4326)
+    extr = Extrinsics(0.0, 0.0, 10.0, -90.0, 45.0, 0.0, 4326)
     ptz = PTZ(0.0, 0.0, None)
     origin, direction = image_ray(200, 150, intr, ptz, extr)
 

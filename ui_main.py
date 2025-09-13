@@ -218,14 +218,27 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @QtCore.Slot(str, dict)
     def _on_layers(self, _alias: str, layers: dict):
-        """Update layer readiness chip.
+        """Update layer readiness chip and display active layers.
 
-        The calibration workflow requires both an orthophoto and a DTM.
-        Display a single check mark when both are available to keep the
-        indicator compact.
+        Shows EPSG and layer paths to help with debugging. The label
+        displays only file names for brevity while full paths are exposed
+        via the tooltip.
         """
-        ready = "✓" if layers.get("ortho") and layers.get("dtm") else "—"
-        self.lbl_layers.setText(f"Layers: Ortho/DTM {ready}")
+        dtm = layers.get("dtm")
+        ortho = layers.get("ortho")
+        epsg = layers.get("srs") or "—"
+        ready = "✓" if dtm and ortho else "—"
+        dtm_name = Path(dtm).name if dtm else "—"
+        ortho_name = Path(ortho).name if ortho else "—"
+        self.lbl_layers.setText(
+            f"Layers: EPSG {epsg} | DTM {dtm_name} | Ortho {ortho_name} {ready}"
+        )
+        self.lbl_layers.setToolTip(
+            f"EPSG: {epsg}\nDTM: {dtm or '—'}\nOrtho: {ortho or '—'}"
+        )
+        self.log(
+            f"Layers updated: EPSG={epsg} DTM={dtm or '—'} Ortho={ortho or '—'}"
+        )
 
     @QtCore.Slot(object)
     def _on_ptz_meta(self, meta: object):

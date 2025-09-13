@@ -114,3 +114,19 @@ def test_intersect_dem_respects_meters_per_unit():
     x, y, z = hit
     assert pytest.approx(x, abs=1e-6) == 1.0
     assert pytest.approx(z, abs=1e-6) == 2.0
+
+
+def test_image_ray_uses_principal_point():
+    """Shifting ``cx`` should change the ray direction."""
+
+    intr = Intrinsics.from_hfov(400, 300, 90.0)
+    # Shift principal point 20 pixels to the right
+    intr_off = Intrinsics(400, 300, intr.fx, intr.fy, intr.cx + 20.0, intr.cy)
+
+    extr = Extrinsics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4326)
+    _, dir_center = image_ray(200, 150, intr, PTZ(0.0, 0.0, None), extr)
+    _, dir_off = image_ray(200, 150, intr_off, PTZ(0.0, 0.0, None), extr)
+
+    # With an off-center principal point the ray should no longer point straight ahead
+    assert dir_center[0] == pytest.approx(0.0, abs=1e-6)
+    assert dir_off[0] > 0.0

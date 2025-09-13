@@ -16,21 +16,43 @@ import numpy as np
 
 @dataclass
 class Intrinsics:
-    """Basic camera intrinsics with focal lengths and principal point."""
+    """Basic camera intrinsics with optional focal lengths and principal point.
+
+    ``fx``/``fy`` and ``cx``/``cy`` may be provided explicitly from a camera
+    calibration.  When they are omitted the constructor falls back to deriving
+    them from a horizontal field of view and image center.
+    """
 
     width: int
     height: int
-    fx: float
-    fy: float
-    cx: float
-    cy: float
+    fx: Optional[float] = None
+    fy: Optional[float] = None
+    cx: Optional[float] = None
+    cy: Optional[float] = None
+    hfov_deg: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        """Fill in missing focal lengths or principal point from ``hfov_deg``."""
+
+        if self.fx is None or self.fy is None:
+            if self.hfov_deg is None:
+                raise ValueError("fx/fy or hfov_deg must be provided")
+            f = (self.width / 2.0) / math.tan(math.radians(self.hfov_deg) / 2.0)
+            if self.fx is None:
+                self.fx = f
+            if self.fy is None:
+                self.fy = f
+
+        if self.cx is None:
+            self.cx = self.width / 2.0
+        if self.cy is None:
+            self.cy = self.height / 2.0
 
     @classmethod
     def from_hfov(cls, width: int, height: int, hfov_deg: float) -> "Intrinsics":
         """Create intrinsics from an image size and horizontal FOV."""
 
-        fx = (width / 2.0) / math.tan(math.radians(hfov_deg) / 2.0)
-        return cls(width, height, fx, fx, width / 2.0, height / 2.0)
+        return cls(width, height, hfov_deg=hfov_deg)
 
 
 @dataclass

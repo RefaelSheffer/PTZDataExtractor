@@ -68,18 +68,29 @@ class DemSampler(Protocol):
 def _rotation_matrix(yaw_deg: float, pitch_deg: float, roll_deg: float) -> np.ndarray:
     """Construct a world←camera rotation matrix.
 
-    The convention follows the existing application code: yaw around Z,
-    pitch around Y and roll around X.  Angles are specified in degrees.
+    The convention follows typical PTZ cameras with yaw (pan) around the
+    vertical ``Z`` axis, pitch (tilt) around ``Y`` and roll around ``X``.
+    Angles are specified in degrees.  The camera frame assumes ``+Z`` is
+    forward, ``+X`` to the right and ``+Y`` down.  To align this with a
+    world frame where ``+X`` is east, ``+Y`` is north and ``+Z`` is up, a
+    fixed rotation is applied that maps a forward-looking camera to point
+    north at the horizon when all angles are zero.
     """
 
-    cy, sy = math.cos(math.radians(yaw_deg)), math.sin(math.radians(yaw_deg))
-    cp, sp = math.cos(math.radians(pitch_deg)), math.sin(math.radians(pitch_deg))
-    cr, sr = math.cos(math.radians(roll_deg)), math.sin(math.radians(roll_deg))
+    yaw_rad = math.radians(90.0 - yaw_deg)
+    pitch_rad = math.radians(pitch_deg)
+    roll_rad = math.radians(roll_deg)
+
+    cy, sy = math.cos(yaw_rad), math.sin(yaw_rad)
+    cp, sp = math.cos(pitch_rad), math.sin(pitch_rad)
+    cr, sr = math.cos(roll_rad), math.sin(roll_rad)
 
     Rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]], dtype=float)
     Ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]], dtype=float)
     Rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]], dtype=float)
-    return Rz @ Ry @ Rx
+    # Camera -> world at zero angles (forward to +Y, up to +Z)
+    R0 = np.array([[0, 0, 1], [1, 0, 0], [0, -1, 0]], dtype=float)
+    return Rz @ Ry @ Rx @ R0
 
 
 def image_ray(u: int, v: int, intr: Intrinsics, ptz: PTZ, extr: Extrinsics) -> Tuple[np.ndarray, np.ndarray]:
@@ -109,7 +120,7 @@ def image_ray(u: int, v: int, intr: Intrinsics, ptz: PTZ, extr: Extrinsics) -> T
     d_cam /= np.linalg.norm(d_cam)
 
     yaw = extr.yaw + (ptz.pan or 0.0)
-    pitch = extr.pitch + (ptz.tilt or 0.0)
+    pitch = extr.pitch - (ptz.tilt or 0.0)
     roll = extr.roll
     R = _rotation_matrix(yaw, pitch, roll)
     d_world = R @ d_cam

@@ -10,6 +10,7 @@ from typing import Optional
 from urllib.error import URLError
 from urllib.request import (
     HTTPBasicAuthHandler,
+    HTTPDigestAuthHandler,
     HTTPPasswordMgrWithDefaultRealm,
     Request,
     build_opener,
@@ -100,8 +101,9 @@ class PtzCgiThread:
         mgr = HTTPPasswordMgrWithDefaultRealm()
         for url in self._urls:
             mgr.add_password(None, url, self.user, self.pwd)
-        handler = HTTPBasicAuthHandler(mgr)
-        self._opener = build_opener(handler)
+        basic = HTTPBasicAuthHandler(mgr)
+        digest = HTTPDigestAuthHandler(mgr)
+        self._opener = build_opener(basic, digest)
 
     def _fetch_text(self) -> Optional[str]:
         if not self._opener:
@@ -179,7 +181,7 @@ class PtzCgiThread:
                     url=self._urls[self._url_index],
                     http_code=200,
                     channel=self.channel,
-                    auth="Basic",
+                    auth="Basic/Digest",
                     body=txt,
                     parsed=parsed,
                     err=err,
@@ -235,7 +237,7 @@ class PtzCgiThread:
                     url=self._urls[self._url_index],
                     http_code=-1,
                     channel=self.channel,
-                    auth="Basic",
+                    auth="Basic/Digest",
                     body="",
                     parsed={},
                     err="no response",

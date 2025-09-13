@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 _PTZ_CSV_LOCK = threading.Lock()
-_PTZ_CSV_PATH = Path.cwd() / "ptz_log.csv"
-_PTZ_DBG_PATH = Path.cwd() / "ptz_debug.log"
+_PTZ_CSV_PATH = Path.cwd() / "ptz_cgi_log.csv"
+_PTZ_DBG_PATH = Path.cwd() / "ptz_cgi_debug.log"
 
 
 def _csv_header():

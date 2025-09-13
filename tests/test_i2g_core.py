@@ -24,12 +24,34 @@ def test_image_ray_center_forward():
     ptz = PTZ(0.0, 0.0, None)
     origin, direction = image_ray(200, 150, intr, ptz, extr)
     assert np.allclose(origin, [0.0, 0.0, 0.0])
-    assert np.allclose(direction, [0.0, 0.0, 1.0])
+    # Facing north with no vertical component
+    assert np.allclose(direction, [0.0, 1.0, 0.0])
+
+
+def test_image_ray_yaw_east():
+    intr = Intrinsics(400, 300, 90.0)
+    extr = Extrinsics(0.0, 0.0, 0.0, 90.0, 0.0, 0.0, 4326)
+    ptz = PTZ(0.0, 0.0, None)
+    _, direction = image_ray(200, 150, intr, ptz, extr)
+    assert np.allclose(direction, [1.0, 0.0, 0.0])
+
+
+def test_image_ray_tilt_sign():
+    intr = Intrinsics(400, 300, 90.0)
+    extr = Extrinsics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4326)
+
+    ptz_down = PTZ(0.0, 10.0, None)
+    _, dir_down = image_ray(200, 150, intr, ptz_down, extr)
+    assert dir_down[2] < 0.0
+
+    ptz_up = PTZ(0.0, -10.0, None)
+    _, dir_up = image_ray(200, 150, intr, ptz_up, extr)
+    assert dir_up[2] > 0.0
 
 
 def test_intersect_flat_dem():
     intr = Intrinsics(400, 300, 90.0)
-    extr = Extrinsics(0.0, 0.0, 10.0, 0.0, -135.0, 0.0, 4326)
+    extr = Extrinsics(0.0, 0.0, 10.0, 90.0, -135.0, 0.0, 4326)
     ptz = PTZ(0.0, 0.0, None)
     origin, direction = image_ray(200, 150, intr, ptz, extr)
     dem = FlatDem(0.0)
@@ -43,7 +65,7 @@ def test_intersect_flat_dem():
 
 def test_intersect_sloped_dem():
     intr = Intrinsics(400, 300, 90.0)
-    extr = Extrinsics(0.0, 0.0, 10.0, 0.0, -135.0, 0.0, 4326)
+    extr = Extrinsics(0.0, 0.0, 10.0, 90.0, -135.0, 0.0, 4326)
     ptz = PTZ(0.0, 0.0, None)
     origin, direction = image_ray(200, 150, intr, ptz, extr)
 

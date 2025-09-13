@@ -7,7 +7,7 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import (
     HTTPBasicAuthHandler,
     HTTPDigestAuthHandler,
@@ -105,21 +105,30 @@ class PtzCgiThread:
         digest = HTTPDigestAuthHandler(mgr)
         self._opener = build_opener(basic, digest)
 
-    def _fetch_text(self) -> Optional[str]:
+    def _fetch_text(self) -> tuple[Optional[str], int]:
         if not self._opener:
-            return None
+            return None, -1
         for i in range(len(self._urls)):
             idx = (self._url_index + i) % len(self._urls)
             url = self._urls[idx]
             try:
                 with self._opener.open(Request(url), timeout=2.0) as resp:
                     self._url_index = idx
-                    return resp.read().decode("utf-8", errors="ignore")
+                    body = resp.read().decode("utf-8", errors="ignore")
+                    code = getattr(resp, "status", 200)
+                    return body, code
+            except HTTPError as e:
+                self._url_index = idx
+                try:
+                    body = e.read().decode("utf-8", errors="ignore")
+                except Exception:
+                    body = ""
+                return body, getattr(e, "code", -1)
             except URLError:
                 continue
             except Exception:
                 continue
-        return None
+        return None, -1
 
     def _normalize_zoom(self, z: Optional[float]) -> Optional[float]:
         if z is None:
@@ -167,8 +176,8 @@ class PtzCgiThread:
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            txt = self._fetch_text()
-            if txt:
+            txt, code = self._fetch_text()
+            if txt and 200 <= code < 300:
                 if not self._has_data:
                     print(f"PTZ CGI data available: {txt.strip()}")
                     self._has_data = True
@@ -179,7 +188,7 @@ class PtzCgiThread:
                 log_ptz_row(
                     source="CGI",
                     url=self._urls[self._url_index],
-                    http_code=200,
+                    http_code=code,
                     channel=self.channel,
                     auth="Basic/Digest",
                     body=txt,
@@ -235,12 +244,12 @@ class PtzCgiThread:
                 log_ptz_row(
                     source="CGI",
                     url=self._urls[self._url_index],
-                    http_code=-1,
+                    http_code=code,
                     channel=self.channel,
                     auth="Basic/Digest",
-                    body="",
+                    body=txt or "",
                     parsed={},
-                    err="no response",
+                    err="no response" if code == -1 else f"http error {code}",
                 )
                 if self._has_data:
                     print("PTZ CGI data unavailable")

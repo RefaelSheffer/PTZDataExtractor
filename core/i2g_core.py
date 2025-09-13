@@ -120,6 +120,8 @@ def image_ray(u: int, v: int, intr: Intrinsics, ptz: PTZ, extr: Extrinsics) -> T
     d_cam /= np.linalg.norm(d_cam)
 
     yaw = extr.yaw + (ptz.pan or 0.0)
+    # Many PTZ cameras define positive tilt as looking downwards.
+    # Subtract to keep the convention that positive pitch raises the view.
     pitch = extr.pitch - (ptz.tilt or 0.0)
     roll = extr.roll
     R = _rotation_matrix(yaw, pitch, roll)

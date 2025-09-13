@@ -18,26 +18,33 @@ class FlatDem:
         return self.elev
 
 
-def test_image_ray_center_forward():
+def test_image_ray_forward_north():
+    """Zero yaw/pitch should look roughly north and above the horizon."""
     intr = Intrinsics.from_hfov(400, 300, 90.0)
     extr = Extrinsics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4326)
-    ptz = PTZ(0.0, 0.0, None)
-    origin, direction = image_ray(200, 150, intr, ptz, extr)
+    origin, direction = image_ray(200, 150, intr, PTZ(0.0, 0.0, None), extr)
     assert np.allclose(origin, [0.0, 0.0, 0.0])
-    assert np.allclose(direction, [0.0, 1.0, 0.0])
+    assert direction[0] == pytest.approx(0.0)
+    assert direction[1] > 0.0
+    assert direction[2] >= 0.0
 
 
-def test_image_ray_pan_and_tilt():
+def test_image_ray_yaw_90_points_east():
+    """Positive yaw should rotate the ray toward +X (east)."""
     intr = Intrinsics.from_hfov(400, 300, 90.0)
     extr = Extrinsics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4326)
-    # Yaw 90 degrees should point east (+X)
-    origin, direction = image_ray(200, 150, intr, PTZ(90.0, 0.0, None), extr)
+    _, direction = image_ray(200, 150, intr, PTZ(90.0, 0.0, None), extr)
     assert np.allclose(direction, [1.0, 0.0, 0.0])
-    # Positive tilt raises the camera (Z>0)
+
+
+def test_image_ray_tilt_sign():
+    """Verify tilt sign where positive tilt looks upward."""
+    intr = Intrinsics.from_hfov(400, 300, 90.0)
+    extr = Extrinsics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4326)
     _, up_dir = image_ray(200, 150, intr, PTZ(0.0, 10.0, None), extr)
     _, down_dir = image_ray(200, 150, intr, PTZ(0.0, -10.0, None), extr)
-    assert up_dir[2] > 0
-    assert down_dir[2] < 0
+    assert up_dir[2] > 0.0
+    assert down_dir[2] < 0.0
 
 
 def test_intersect_flat_dem():

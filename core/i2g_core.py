@@ -16,10 +16,21 @@ import numpy as np
 
 @dataclass
 class Intrinsics:
-    """Basic camera intrinsics derived from horizontal field of view."""
+    """Basic camera intrinsics with focal lengths and principal point."""
+
     width: int
     height: int
-    hfov_deg: float
+    fx: float
+    fy: float
+    cx: float
+    cy: float
+
+    @classmethod
+    def from_hfov(cls, width: int, height: int, hfov_deg: float) -> "Intrinsics":
+        """Create intrinsics from an image size and horizontal FOV."""
+
+        fx = (width / 2.0) / math.tan(math.radians(hfov_deg) / 2.0)
+        return cls(width, height, fx, fx, width / 2.0, height / 2.0)
 
 
 @dataclass
@@ -79,7 +90,7 @@ def image_ray(u: int, v: int, intr: Intrinsics, ptz: PTZ, extr: Extrinsics) -> T
     u, v:
         Pixel coordinates in the image (origin at top-left).
     intr:
-        Camera intrinsics (width/height/horizontal field of view).
+        Camera intrinsics describing focal lengths and principal point.
     ptz:
         Optional pan/tilt offsets applied to the extrinsic pose.
     extr:
@@ -91,13 +102,9 @@ def image_ray(u: int, v: int, intr: Intrinsics, ptz: PTZ, extr: Extrinsics) -> T
         The 3D origin of the ray and a unit-length direction vector.
     """
 
-    # Build simple pin-hole intrinsics from horizontal FOV
-    fx = (intr.width / 2.0) / math.tan(math.radians(intr.hfov_deg) / 2.0)
-    fy = fx
-    cx, cy = intr.width / 2.0, intr.height / 2.0
-
-    x_cam = (u - cx) / fx
-    y_cam = (v - cy) / fy
+    # Project pixel coordinates into the camera frame using intrinsics
+    x_cam = (u - intr.cx) / intr.fx
+    y_cam = (v - intr.cy) / intr.fy
     d_cam = np.array([x_cam, y_cam, 1.0], dtype=float)
     d_cam /= np.linalg.norm(d_cam)
 

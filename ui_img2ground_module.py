@@ -1749,11 +1749,9 @@ class Img2GroundModule(QtCore.QObject):
         intr_d = self._bundle["intrinsics"]
         W = intr_d["width"]; H = intr_d["height"]
         if self._hfov_deg is not None:
-            hfov = float(self._hfov_deg)
+            intr = Intrinsics.from_hfov(W, H, float(self._hfov_deg))
         else:
-            fx = intr_d["fx"]
-            hfov = math.degrees(2.0 * math.atan(W / (2.0 * fx)))
-        intr = Intrinsics(W, H, hfov)
+            intr = Intrinsics(W, H, intr_d["fx"], intr_d["fy"], intr_d["cx"], intr_d["cy"])
 
         pose_d = self._bundle["pose"]
         pitch = pose_d.get("pitch_deg", pose_d.get("pitch", 0.0))

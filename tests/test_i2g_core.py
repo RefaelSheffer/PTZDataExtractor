@@ -19,7 +19,7 @@ class FlatDem:
 
 
 def test_image_ray_center_forward():
-    intr = Intrinsics(400, 300, 90.0)
+    intr = Intrinsics.from_hfov(400, 300, 90.0)
     extr = Extrinsics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4326)
     ptz = PTZ(0.0, 0.0, None)
     origin, direction = image_ray(200, 150, intr, ptz, extr)
@@ -28,7 +28,7 @@ def test_image_ray_center_forward():
 
 
 def test_intersect_flat_dem():
-    intr = Intrinsics(400, 300, 90.0)
+    intr = Intrinsics.from_hfov(400, 300, 90.0)
     extr = Extrinsics(0.0, 0.0, 10.0, 0.0, -135.0, 0.0, 4326)
     ptz = PTZ(0.0, 0.0, None)
     origin, direction = image_ray(200, 150, intr, ptz, extr)
@@ -42,7 +42,7 @@ def test_intersect_flat_dem():
 
 
 def test_intersect_sloped_dem():
-    intr = Intrinsics(400, 300, 90.0)
+    intr = Intrinsics.from_hfov(400, 300, 90.0)
     extr = Extrinsics(0.0, 0.0, 10.0, 0.0, -135.0, 0.0, 4326)
     ptz = PTZ(0.0, 0.0, None)
     origin, direction = image_ray(200, 150, intr, ptz, extr)

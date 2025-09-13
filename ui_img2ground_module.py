@@ -409,6 +409,10 @@ class Img2GroundModule(QtCore.QObject):
         self._fx_from_hfov: Optional[float] = None
         self._fov_items: List[QtWidgets.QGraphicsLineItem] = []
         self._azimuth_item: Optional[QtWidgets.QGraphicsLineItem] = None
+        self._telemetry_source = "ptz"
+        self._last_pan: Optional[float] = None
+        self._intrinsics: Dict[str, Any] = {}
+        self._cam_xy: Optional[Tuple[float, float]] = None
 
         # last pick
         self._last_geo = None
@@ -434,8 +438,9 @@ class Img2GroundModule(QtCore.QObject):
         self._az_btn_timer.start()
         shared_state.signal_camera_changed.connect(self._on_active_camera_changed)
         shared_state.signal_stream_mode_changed.connect(self._on_stream_mode_changed)
-        shared_state.signal_camera_changed.connect(lambda ctx: self._apply_layers_from_shared())
+        shared_state.signal_camera_changed.connect(lambda *_: self._apply_layers_from_shared())
         shared_state.signal_layers_changed.connect(self._on_layers_changed)
+        shared_state.signal_layers_changed.connect(lambda *_: self._apply_layers_from_shared())
         bus.signal_camera_changed.connect(lambda ctx: self._apply_layers_from_shared())
         bus.signal_ortho_changed.connect(self._on_ortho_changed)
         if app_state.current_camera:
@@ -906,7 +911,13 @@ class Img2GroundModule(QtCore.QObject):
             except Exception:
                 n_after = -1
             print(f"[I2G.apply_ortho] after clear: items={n_after}")
-            self._ortho_pix = QtWidgets.QGraphicsPixmapItem(pix); self._ortho_pix.setZValue(0); sc.addItem(self._ortho_pix)
+            self._ortho_pix = QtWidgets.QGraphicsPixmapItem(pix)
+            self._ortho_pix.setZValue(0)
+            sc.addItem(self._ortho_pix)
+            layer.pixmap_item = self._ortho_pix
+            print(
+                f"[I2G.ortho] pixmap loaded? {not pix.isNull()} scene_has_items={len(self._map.scene().items())}"
+            )
             self._map.setSceneRect(self._ortho_pix.boundingRect())
             try:
                 self._map.fit()
@@ -939,6 +950,7 @@ class Img2GroundModule(QtCore.QObject):
                 tr = Transformer.from_crs(f"EPSG:{epsg_cam}", f"EPSG:{epsg_here}", always_xy=True)
                 X, Y = tr.transform(X, Y)
                 print(f"[I2G._draw_camera_marker] transformed to ortho CRS → ({X:.3f},{Y:.3f})")
+            self._cam_xy = (X, Y)
             xs, ys = self._ortho_layer.geo_to_scene(X, Y)
             print(f"[I2G._draw_camera_marker] scene coords → ({xs:.1f},{ys:.1f}) ; map has scene={self._map.scene() is not None}")
             self._map.set_marker(xs, ys)
@@ -963,35 +975,42 @@ class Img2GroundModule(QtCore.QObject):
         if alias == getattr(app_state.current_camera, "alias", None):
             self._apply_layers_from_shared()
 
+    def _current_alias_or_default(self) -> str:
+        return getattr(app_state.current_camera, "alias", None) or "(default)"
+
     def _apply_layers_from_shared(self) -> None:
-        alias = getattr(app_state.current_camera, "alias", None)
-        if not alias:
-            return
-        layers = shared_state.layers_for_camera.get(alias)
-        if not layers:
-            # fallback for layers loaded before camera selection
-            layers = shared_state.layers_for_camera.get("(default)")
-        if layers is None:
-            proj = getattr(app_state, "project", None)
-            if proj is not None:
-                layers = getattr(proj, "layers_for_camera", {}).get(alias)
-        if not layers:
-            return
-        dtm = self._resolve_path(layers.get("dtm"))
-        ortho = self._resolve_path(layers.get("ortho"))
+        alias = self._current_alias_or_default()
+        layers = (
+            shared_state.layers_for_camera.get(alias)
+            or shared_state.layers_for_camera.get("(default)")
+            or {}
+        )
+        ortho = layers.get("ortho")
+        dtm = layers.get("dtm")
+        print(f"[I2G.layers] alias={alias!r} has_dtm={bool(dtm)} has_ortho={bool(ortho)} source=Preparation")
         if dtm:
-            self._load_dtm_path(dtm)
+            dtm = self._resolve_path(dtm)
+            self._set_dtm_layer(dtm)
         if ortho:
-            self._load_orthophoto_path(ortho)
+            ortho = self._resolve_path(ortho)
+            self._set_ortho_layer(ortho)
+        self._cam_xy = getattr(shared_state, "camera_proj", None)
         try:
             self._map.fit()
         except Exception:
             pass
         self.ed_dtm.setText(str(dtm) if dtm else "")
         self.ed_ortho.setText(str(ortho) if ortho else "")
-        QtCore.QTimer.singleShot(0, self._refresh_readiness)
-        QtCore.QTimer.singleShot(0, self._refresh_az_btn_state)
-        QtCore.QTimer.singleShot(0, self._refresh_level_btn_state)
+        self._refresh_readiness()
+        self._refresh_az_btn_state()
+        self._refresh_level_btn_state()
+
+    def _set_dtm_layer(self, path: str) -> None:
+        self._load_dtm_path(path)
+
+    def _set_ortho_layer(self, path: str) -> None:
+        print(f"[I2G.ortho] loading ortho from {path}")
+        self._load_orthophoto_path(path)
 
     def _load_dtm_path(self, path: str) -> None:
         try:
@@ -1005,8 +1024,6 @@ class Img2GroundModule(QtCore.QObject):
     def _load_orthophoto_path(self, path: str) -> None:
         try:
             self._load_orthophoto(path)
-            # Flag the presence of an orthophoto for readiness checks
-            self._ortho_layer = getattr(self._map, "ortho_layer", None) or True
         except Exception:
             pass
 
@@ -1211,21 +1228,34 @@ class Img2GroundModule(QtCore.QObject):
             return float(ctx.pan_deg)
         return None
 
+    def _ortho_ready(self) -> bool:
+        ok = bool(
+            getattr(self, "_ortho_layer", None)
+            and getattr(self._ortho_layer, "pixmap_item", None)
+            and not self._ortho_layer.pixmap_item.pixmap().isNull()
+        )
+        print(
+            f"[I2G.ready] ortho_ready={ok} "
+            f"layer={'Y' if getattr(self, '_ortho_layer', None) else 'N'} "
+            f"pixitem={'Y' if getattr(getattr(self, '_ortho_layer', None), 'pixmap_item', None) else 'N'}"
+        )
+        return ok
+
     def _ready_flags(self) -> tuple[bool, bool, bool, bool]:
-        has_ortho = bool(self._ortho_layer)
-        has_xy = bool(getattr(shared_state, "camera_proj", None))
-        has_pan = self._get_pan_now() is not None
-        has_intr = bool(getattr(getattr(app_state, "current_camera", None), "intrinsics", None))
+        has_ortho = self._ortho_ready()
+        has_xy = bool(getattr(self, "_cam_xy", None))
+        has_pan = (
+            self._telemetry_source == "pan" and self._last_pan is not None
+        ) or (
+            self._telemetry_source == "ptz" and getattr(self._ptz_last, "pan_deg", None) is not None
+        )
+        has_intr = bool(self._intrinsics and self._intrinsics.get("hfov_deg"))
+        print(
+            f"[I2G.ready] has_ortho={has_ortho} has_xy={has_xy} has_pan={has_pan} has_intr={has_intr}"
+        )
         return has_ortho, has_xy, has_pan, has_intr
 
     def _refresh_readiness(self) -> None:
-        if not getattr(self, "_dbg_readiness_printed", False):
-            self._log(
-                f"DBG readiness: ortho={bool(self._ortho_layer)} "
-                f"xy={bool(getattr(shared_state,'camera_proj',None))} "
-                f"pan={self._get_pan_now()}"
-            )
-            self._dbg_readiness_printed = True
         has_ortho, has_xy, has_pan, has_intr = self._ready_flags()
         self.chk_ortho.setChecked(has_ortho)
         self.chk_camxy.setChecked(has_xy)

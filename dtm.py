@@ -18,6 +18,11 @@ except Exception as e:
     xy = None
     _RASTERIO_IMPORT_ERROR = repr(e)
 
+try:  # optional dependency
+    from pyproj import Geod
+except Exception:  # pragma: no cover
+    Geod = None  # type: ignore
+
 @dataclass
 class DTMInfo:
     crs_epsg: Optional[int]
@@ -45,6 +50,21 @@ class DTM:
             height = self.ds.height,
             bounds = self.ds.bounds  # left, bottom, right, top
         )
+        self.meters_per_unit = 1.0
+        try:
+            if self.crs and self.crs.is_geographic:
+                bounds = self.ds.bounds
+                lon = (bounds.left + bounds.right) / 2.0
+                lat = (bounds.bottom + bounds.top) / 2.0
+                if Geod is not None:
+                    geod = Geod(ellps="WGS84")
+                    _, _, dx = geod.inv(lon, lat, lon + 1.0, lat)
+                    _, _, dy = geod.inv(lon, lat, lon, lat + 1.0)
+                    self.meters_per_unit = (abs(dx) + abs(dy)) / 2.0
+                else:  # pragma: no cover - fallback
+                    self.meters_per_unit = 111_320.0
+        except Exception:  # pragma: no cover - defensive
+            self.meters_per_unit = 1.0
 
     def close(self):
         try:

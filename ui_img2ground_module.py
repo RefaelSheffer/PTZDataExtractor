@@ -1506,7 +1506,7 @@ class Img2GroundModule(QtCore.QObject):
                 o = np.array([prj0["x"], prj0["y"], g0["lla"]["alt"]])
                 yaw_rad = math.radians(yaw_avg)
                 d = np.array([math.sin(yaw_rad), math.cos(yaw_rad), 0.0])
-                self._draw_azimuth_line(o, d)
+                self._draw_azimuth_line(o, d, georef.projected_epsg)
         self._refresh_readiness()
         self._refresh_az_btn_state()
 
@@ -1544,7 +1544,9 @@ class Img2GroundModule(QtCore.QObject):
             except Exception: pass
             self._azimuth_item = None
 
-    def _draw_azimuth_line(self, o: np.ndarray, d: np.ndarray, length: float = 200.0):
+    def _draw_azimuth_line(
+        self, o: np.ndarray, d: np.ndarray, length: float = 200.0, epsg: Optional[int] = None
+    ) -> None:
         self._remove_azimuth_line()
         if self._ortho_layer is None:
             return
@@ -1554,12 +1556,23 @@ class Img2GroundModule(QtCore.QObject):
             return
         dir_xy /= n
         start = o
-        end = o + np.array([dir_xy[0]*length, dir_xy[1]*length, 0.0])
+        end = o + np.array([dir_xy[0] * length, dir_xy[1] * length, 0.0])
         try:
-            xs1, ys1 = self._ortho_layer.geo_to_scene(start[0], start[1])
-            xs2, ys2 = self._ortho_layer.geo_to_scene(end[0], end[1])
+            epsg_layer = self._ortho_layer.ds.crs.to_epsg()
+            if epsg_layer and epsg and epsg_layer != epsg:
+                tr = Transformer.from_crs(
+                    f"EPSG:{epsg}", f"EPSG:{epsg_layer}", always_xy=True
+                )
+                x1, y1 = tr.transform(start[0], start[1])
+                x2, y2 = tr.transform(end[0], end[1])
+            else:
+                x1, y1 = start[0], start[1]
+                x2, y2 = end[0], end[1]
+            xs1, ys1 = self._ortho_layer.geo_to_scene(x1, y1)
+            xs2, ys2 = self._ortho_layer.geo_to_scene(x2, y2)
             sc = self._ensure_scene()
-            pen = QtGui.QPen(QtGui.QColor(255, 0, 0), 2); pen.setCosmetic(True)
+            pen = QtGui.QPen(QtGui.QColor(255, 0, 0), 2)
+            pen.setCosmetic(True)
             self._azimuth_item = sc.addLine(xs1, ys1, xs2, ys2, pen)
             self._azimuth_item.setZValue(25)
         except Exception:
@@ -1774,17 +1787,19 @@ class Img2GroundModule(QtCore.QObject):
         o, d = image_ray(u, v, intr, ptz, extr)
 
         # ensure origin uses orthophoto EPSG
+        epsg_o = extr.epsg
         try:
             epsg_ortho = self._ortho_layer.ds.crs.to_epsg() if self._ortho_layer else None
-            if epsg_ortho and extr.epsg and epsg_ortho != extr.epsg:
-                tr = Transformer.from_crs(f"EPSG:{extr.epsg}", f"EPSG:{epsg_ortho}", always_xy=True)
+            if epsg_ortho and epsg_o and epsg_ortho != epsg_o:
+                tr = Transformer.from_crs(f"EPSG:{epsg_o}", f"EPSG:{epsg_ortho}", always_xy=True)
                 ox, oy = tr.transform(o[0], o[1])
                 o = np.array([ox, oy, o[2]], dtype=float)
+                epsg_o = epsg_ortho
         except Exception:
             pass
 
         # always draw azimuth line
-        self._draw_azimuth_line(o, d)
+        self._draw_azimuth_line(o, d, epsg_o)
 
         if self._dtm is None:
             self._remove_last_pick()

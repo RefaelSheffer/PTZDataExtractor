@@ -196,11 +196,14 @@ class UserTab(QtWidgets.QWidget):
             epsg_here = self._ortho_layer.ds.crs.to_epsg()
             X, Y = float(cam["x"]), float(cam["y"])
             epsg_cam = cam.get("epsg")
+            print(f"[User._draw_camera_marker] cam({X:.3f},{Y:.3f}) epsg_cam={epsg_cam} → epsg_here={epsg_here}")
             if epsg_here and epsg_cam and epsg_cam != epsg_here:
                 from pyproj import Transformer
                 tr = Transformer.from_crs(f"EPSG:{epsg_cam}", f"EPSG:{epsg_here}", always_xy=True)
                 X, Y = tr.transform(X, Y)
+                print(f"[User._draw_camera_marker] transformed to ortho CRS → ({X:.3f},{Y:.3f})")
             xs, ys = self._ortho_layer.geo_to_scene(X, Y)
+            print(f"[User._draw_camera_marker] scene coords → ({xs:.1f},{ys:.1f}) ; map has scene={self.map.scene() is not None}")
             self.map.set_marker(xs, ys)
         except Exception as e:  # pragma: no cover - UI feedback
             self._log(f"draw_camera_marker failed: {e}")

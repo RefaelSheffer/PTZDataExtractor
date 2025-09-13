@@ -892,7 +892,18 @@ class Img2GroundModule(QtCore.QObject):
             self._ortho_layer = layer
             img = numpy_to_qimage(layer.downsampled_image())
             pix = QtGui.QPixmap.fromImage(img)
-            sc = self._ensure_scene(); sc.clear()
+            sc = self._ensure_scene()
+            try:
+                n_before = len(sc.items())
+            except Exception:
+                n_before = -1
+            print(f"[I2G.apply_ortho] before clear: items={n_before}")
+            sc.clear()
+            try:
+                n_after = len(sc.items())
+            except Exception:
+                n_after = -1
+            print(f"[I2G.apply_ortho] after clear: items={n_after}")
             self._ortho_pix = QtWidgets.QGraphicsPixmapItem(pix); self._ortho_pix.setZValue(0); sc.addItem(self._ortho_pix)
             self._map.setSceneRect(self._ortho_pix.boundingRect())
             try:
@@ -905,8 +916,32 @@ class Img2GroundModule(QtCore.QObject):
             self._refresh_readiness()
             self._refresh_az_btn_state()
             self._refresh_level_btn_state()
+            print("[I2G.apply_ortho] scheduling draw_shared_camera_marker in 50ms")
+            QtCore.QTimer.singleShot(50, self._draw_shared_camera_marker)
         except Exception as e:
             QtWidgets.QMessageBox.warning(None, "Orthophoto", f"Failed to load: {e}")
+
+    def _draw_shared_camera_marker(self) -> None:
+        if self._ortho_layer is None:
+            return
+        cam = getattr(shared_state, "camera_proj", None)
+        if not cam:
+            return
+        try:
+            epsg_here = self._ortho_layer.ds.crs.to_epsg()
+            X, Y = float(cam["x"]), float(cam["y"])
+            epsg_cam = cam.get("epsg")
+            print(f"[I2G._draw_camera_marker] cam({X:.3f},{Y:.3f}) epsg_cam={epsg_cam} → epsg_here={epsg_here}")
+            if epsg_here and epsg_cam and epsg_cam != epsg_here:
+                from pyproj import Transformer
+                tr = Transformer.from_crs(f"EPSG:{epsg_cam}", f"EPSG:{epsg_here}", always_xy=True)
+                X, Y = tr.transform(X, Y)
+                print(f"[I2G._draw_camera_marker] transformed to ortho CRS → ({X:.3f},{Y:.3f})")
+            xs, ys = self._ortho_layer.geo_to_scene(X, Y)
+            print(f"[I2G._draw_camera_marker] scene coords → ({xs:.1f},{ys:.1f}) ; map has scene={self._map.scene() is not None}")
+            self._map.set_marker(xs, ys)
+        except Exception as e:
+            self._log(f"draw_camera_marker failed: {e}")
 
     def _load_orthophoto(self, path: Optional[str] = None) -> None:
         if not path:

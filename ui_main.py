@@ -128,8 +128,8 @@ class MainWindow(QtWidgets.QMainWindow):
         shared_state.signal_layers_changed.connect(self._on_layers)
         shared_state.signal_ptz_meta_changed.connect(self._on_ptz_meta)
         shared_state.signal_camera_changed.connect(lambda *_: (self._ensure_layers_for_current_camera(),
-                                                               self._maybe_auto_jump_to_i2g()))
-        shared_state.signal_layers_changed.connect(lambda *_: self._maybe_auto_jump_to_i2g())
+                                                               self._notify_i2g_ready()))
+        shared_state.signal_layers_changed.connect(lambda *_: self._notify_i2g_ready())
 
     def save_project(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Project", "", "RTG Project (*.rtgproj)")
@@ -252,15 +252,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
             shared_state.signal_layers_changed.emit(alias, shared_state.layers_for_camera[alias])
 
-    def _maybe_auto_jump_to_i2g(self) -> None:
+    def _notify_i2g_ready(self) -> None:
         cur = getattr(app_state, "current_camera", None)
         alias = getattr(cur, "alias", None) or "(default)"
         layers = shared_state.layers_for_camera.get(alias) or {}
         ready_layers = bool(layers.get("dtm")) and bool(layers.get("ortho"))
         if cur and ready_layers:
-            idx = self._index_of_settings_tab("Image → Ground")
-            if idx != -1:
-                self.settings_tabs.setCurrentIndex(idx)
+            print("[Main] Ready for Image → Ground (no auto-switch)")
 
 def main():
     app = QtWidgets.QApplication(sys.argv)

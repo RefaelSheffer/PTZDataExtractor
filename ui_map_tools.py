@@ -121,11 +121,30 @@ class MapView(QtWidgets.QGraphicsView):
 
     # CAM קבוע
     def set_marker(self, xs: float, ys: float):
+        # ודא שיש סצנה פעילה
         if self.scene() is None:
             self.setScene(QtWidgets.QGraphicsScene())
+            print("[MapView.set_marker] scene was None → created new scene")
+
+        # ריפוי 'ידית תלויה'
+        def _marker_alive(g):
+            if g is None:
+                return False
+            try:
+                return g.scene() is not None
+            except RuntimeError:
+                return False
+
+        if not _marker_alive(getattr(self, "_marker_cam", None)):
+            if getattr(self, "_marker_cam", None) is not None:
+                print("[MapView.set_marker] existing marker invalid → resetting handle")
+            self._marker_cam = None
+
         pen = QtGui.QPen(QtGui.QColor(255, 80, 80), 2)
         brush = QtGui.QBrush(QtGui.QColor(255, 80, 80))
+
         if self._marker_cam is None:
+            print(f"[MapView.set_marker] creating marker at ({xs:.2f}, {ys:.2f})")
             grp = QtWidgets.QGraphicsItemGroup()
             dot = self.scene().addEllipse(-5, -5, 10, 10, pen, brush); grp.addToGroup(dot)
             l1 = self.scene().addLine(-12, 0, 12, 0, pen); grp.addToGroup(l1)
@@ -137,5 +156,13 @@ class MapView(QtWidgets.QGraphicsView):
             grp.setZValue(1000)
             grp.setData(0, "cam")
             self._marker_cam = grp
-        self._marker_cam.setPos(xs, ys)
-        self._marker_cam.setVisible(True)
+        else:
+            print(f"[MapView.set_marker] reusing marker → move to ({xs:.2f}, {ys:.2f})")
+
+        try:
+            self._marker_cam.setPos(xs, ys)
+            self._marker_cam.setVisible(True)
+        except RuntimeError as e:
+            print(f"[MapView.set_marker] setPos failed: {e} — recreating")
+            self._marker_cam = None
+            self.set_marker(xs, ys)  # ניסיון שני יצור מחדש
